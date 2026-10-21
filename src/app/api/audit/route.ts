@@ -1,6 +1,7 @@
 import { AuditError, analyzeSite } from "@/lib/analyzer";
 import { rateLimit } from "@/lib/rate-limit";
-import type { AuditApiError } from "@/types/audit";
+import { SITE_TYPES, isSiteType } from "@/lib/site-types";
+import type { AuditApiError, SiteType } from "@/types/audit";
 
 export const maxDuration = 60;
 
@@ -45,8 +46,23 @@ export async function GET(request: Request) {
     return errorResponse("invalid_url", "That URL is too long to audit.", 400);
   }
 
+  const typeParam = searchParams.get("type")?.trim().toLowerCase() ?? null;
+  let siteType: SiteType | null = null;
+
+  if (typeParam) {
+    if (!isSiteType(typeParam)) {
+      return errorResponse(
+        "invalid_site_type",
+        `Unknown site type “${typeParam}”.`,
+        400,
+        `Use one of: ${SITE_TYPES.map((type) => type.id).join(", ")}. Omit the parameter to classify automatically.`,
+      );
+    }
+    siteType = typeParam;
+  }
+
   try {
-    const audit = await analyzeSite(target);
+    const audit = await analyzeSite(target, { siteType });
     return Response.json(audit, {
       headers: {
         "cache-control": "no-store",

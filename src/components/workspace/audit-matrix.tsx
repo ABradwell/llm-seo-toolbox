@@ -124,7 +124,11 @@ export function AuditMatrix({
                   <div
                     className={cn(
                       "h-full",
-                      pillar.score >= 75 ? "bg-pass" : pillar.score >= 50 ? "bg-warn" : "bg-fail",
+                      pillar.score >= 75
+                        ? "bg-pass-bright"
+                        : pillar.score >= 50
+                          ? "bg-warn-bright"
+                          : "bg-fail-bright",
                     )}
                     style={{ width: `${pillar.score}%` }}
                   />

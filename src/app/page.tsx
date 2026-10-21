@@ -1,6 +1,7 @@
 import { CoffeeBanner } from "@/components/landing/coffee-banner";
 import { CrawlerStrip } from "@/components/landing/crawler-strip";
 import { SiteFooter } from "@/components/landing/footer";
+import { PipelineDiagram } from "@/components/landing/pipeline-diagram";
 import { SiteHeader } from "@/components/landing/site-header";
 import { SpecChecklist } from "@/components/landing/spec-checklist";
 import { TerminalHero } from "@/components/landing/terminal-hero";
@@ -32,6 +33,7 @@ export default function HomePage() {
       <SiteHeader />
       <main className="flex-1">
         <TerminalHero />
+        <PipelineDiagram />
         <CrawlerStrip />
         <SpecChecklist />
         <CoffeeBanner />

@@ -11,7 +11,7 @@ import {
   Terminal,
 } from "lucide-react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 import { Logo } from "@/components/logo";
@@ -19,11 +19,16 @@ import { QuickAuditBar } from "@/components/landing/quick-audit-bar";
 import { AuditMatrix } from "@/components/workspace/audit-matrix";
 import { LlmsTxtEditor } from "@/components/workspace/llms-txt-editor";
 import { ScraperSimulator } from "@/components/workspace/scraper-simulator";
+import {
+  SiteClassificationPanel,
+  type SiteTypeSelection,
+} from "@/components/workspace/site-classification-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SAMPLE_TARGETS } from "@/lib/samples";
 import { siteConfig } from "@/lib/site";
+import { isSiteType } from "@/lib/site-types";
 import { scoreTone } from "@/lib/score";
 import type { AuditApiError, AuditResult } from "@/types/audit";
 
@@ -41,7 +46,11 @@ interface FetchState {
 
 export function Workspace() {
   const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
   const rawUrl = searchParams.get("url")?.trim() ?? "";
+  const rawType = searchParams.get("type") ?? "";
+  const override = isSiteType(rawType) ? rawType : null;
 
   const [refreshToken, setRefreshToken] = useState(0);
   const [fetchState, setFetchState] = useState<FetchState>({
@@ -51,15 +60,16 @@ export function Workspace() {
     error: null,
   });
 
-  const requestKey = `${rawUrl}::${refreshToken}`;
+  const requestKey = `${rawUrl}::${override ?? "auto"}::${refreshToken}`;
 
   useEffect(() => {
     if (!rawUrl) return;
 
     const controller = new AbortController();
     let active = true;
+    const typeQuery = override ? `&type=${encodeURIComponent(override)}` : "";
 
-    fetch(`/api/audit?url=${encodeURIComponent(rawUrl)}`, {
+    fetch(`/api/audit?url=${encodeURIComponent(rawUrl)}${typeQuery}`, {
       signal: controller.signal,
       headers: { accept: "application/json" },
     })
@@ -103,7 +113,7 @@ export function Workspace() {
       active = false;
       controller.abort();
     };
-  }, [rawUrl, requestKey]);
+  }, [rawUrl, override, requestKey]);
 
   const settled = fetchState.key === requestKey;
   const sameTarget = fetchState.url === rawUrl;
@@ -111,6 +121,17 @@ export function Workspace() {
   const error = settled ? fetchState.error : null;
   const loading = Boolean(rawUrl) && !settled;
   const refresh = useCallback(() => setRefreshToken((token) => token + 1), []);
+
+  const selectSiteType = useCallback(
+    (selection: SiteTypeSelection) => {
+      if (!rawUrl) return;
+      const params = new URLSearchParams(searchParams.toString());
+      if (selection === "auto") params.delete("type");
+      else params.set("type", selection);
+      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    },
+    [pathname, rawUrl, router, searchParams],
+  );
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -193,6 +214,13 @@ export function Workspace() {
               )}
             </div>
 
+            <SiteClassificationPanel
+              classification={audit.classification}
+              selected={override ?? "auto"}
+              onSelect={selectSiteType}
+              busy={loading}
+            />
+
             <Tabs defaultValue="audit" className="space-y-4">
               <TabsList>
                 <TabsTrigger value="audit">
@@ -244,7 +272,7 @@ export function WorkspaceSkeleton() {
       </div>
       <p className="flex items-center justify-center gap-2 font-mono text-[10px] text-muted">
         <RefreshCw className="size-3 animate-spin" aria-hidden="true" />
-        Fetching HTML, robots.txt, llms.txt, sitemap.xml and structured data…
+        Fetching HTML, classification signals and discovery manifests…
       </p>
     </div>
   );
@@ -343,7 +371,7 @@ function WorkspaceFooter() {
   return (
     <footer className="border-t border-line">
       <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-3 font-mono text-[10px] text-muted sm:px-6">
-        <p>LLMReady · GPL-3.0-only · v2</p>
+        <p>LLMReady · GPL-3.0-only · v3</p>
         <nav className="flex flex-wrap items-center gap-3" aria-label="Workspace footer">
           <a
             href={siteConfig.llmsTxtSpec}
