@@ -1,0 +1,13 @@
+title = "LLMReady secret scanning"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Generated and fixture files that should never contain real secrets"
+paths = [
+  '''pnpm-lock\.yaml''',
+  '''package-lock\.json''',
+  '''\.env\.example''',
+  '''CHANGELOG\.md''',
+]
