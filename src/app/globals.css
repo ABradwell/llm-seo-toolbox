@@ -1,0 +1,168 @@
+@import "tailwindcss";
+
+:root {
+  --background: #080a08;
+  --foreground: #f0f2e8;
+  --panel: #0e110d;
+  --panel-2: #141813;
+  --muted: #969e91;
+  --line: rgba(240, 242, 232, 0.11);
+  --acid: #c8f169;
+  --acid-strong: #d8ff83;
+  --pass: #a8e56d;
+  --warn: #f3c45a;
+  --fail: #ff7f6b;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-acid: var(--acid);
+  --color-acid-strong: var(--acid-strong);
+  --color-pass: var(--pass);
+  --color-warn: var(--warn);
+  --color-fail: var(--fail);
+  --font-sans: var(--font-space-grotesk);
+  --font-mono: var(--font-jetbrains-mono);
+  --font-serif: var(--font-instrument-serif);
+}
+
+* {
+  border-color: var(--line);
+}
+
+html {
+  background: var(--background);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-space-grotesk), ui-sans-serif, system-ui, sans-serif;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: var(--acid);
+  color: #0a0d09;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0b0e0a;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2b3228;
+  border: 2px solid #0b0e0a;
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3b4536;
+}
+
+:focus-visible {
+  outline: 2px solid var(--acid);
+  outline-offset: 3px;
+}
+
+details > summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+details > summary::-webkit-details-marker {
+  display: none;
+}
+
+summary::-webkit-details-marker {
+  display: none;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes soft-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(200%);
+  }
+}
+
+@keyframes drift {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(0, -28px, 0);
+  }
+}
+
+@utility rise-in {
+  animation: rise 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@utility panel-glow {
+  box-shadow:
+    0 0 0 1px rgba(200, 241, 105, 0.08),
+    0 24px 90px -40px rgba(200, 241, 105, 0.22);
+}
+
+@utility grid-lines {
+  background-image:
+    linear-gradient(to right, rgba(240, 242, 232, 0.055) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(240, 242, 232, 0.055) 1px, transparent 1px);
+  background-size: 64px 64px;
+}
+
+@utility dot-grid {
+  background-image: radial-gradient(rgba(240, 242, 232, 0.14) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+@utility text-gradient {
+  background: linear-gradient(110deg, #f0f2e8 20%, #c8f169 58%, #f0f2e8 90%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
