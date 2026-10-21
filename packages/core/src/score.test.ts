@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { gradeFor, scoreAudit, scorePillar, statusScore } from "./score";
-import type { AuditCheck } from "@/types/audit";
+import type { AuditCheck } from "./types";
 
 function check(status: AuditCheck["status"], weight = 1): AuditCheck {
   return {

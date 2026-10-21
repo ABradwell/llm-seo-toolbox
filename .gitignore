@@ -128,6 +128,11 @@ dist
 # pnpm
 .pnpm-store
 
+# LLM SEO Toolbox CLI config (copy .llmseotoolboxrc.example)
+.llmseotoolboxrc
+.llmseotoolboxrc.json
+llm-seo-toolbox.config.json
+
 # yarn v3
 .pnp.*
 .yarn/*

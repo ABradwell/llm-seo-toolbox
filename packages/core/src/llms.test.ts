@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { buildLlmsFullTxt, buildLlmsTxt, groupPages, sectionForPath } from "./llms";
-import type { AuditPage } from "@/types/audit";
+import type { AuditPage } from "./types";
 
 const pages: AuditPage[] = [
   { url: "https://example.com/", label: "Home", section: "Home", source: "home" },

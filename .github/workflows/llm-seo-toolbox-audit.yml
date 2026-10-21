@@ -1,0 +1,47 @@
+name: LLM SEO Toolbox compatibility gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  audit:
+    name: Audit the deployed site
+    runs-on: ubuntu-latest
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the audit action
+        run: pnpm build:action
+
+      - name: Audit the production deployment
+        uses: ./actions/audit
+        with:
+          url: ${{ vars.LLM_SEO_TOOLBOX_AUDIT_URL || 'https://llm-seo-toolbox.vercel.app' }}
+          min-score: "80"
+          min-grade: "B"
+          comment-on-pr: "true"
+          github-token: ${{ secrets.GITHUB_TOKEN }}

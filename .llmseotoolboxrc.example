@@ -1,0 +1,8 @@
+{
+  "format": "table",
+  "minScore": 75,
+  "minGrade": "B",
+  "siteType": "auto",
+  "timeout": 10000,
+  "userAgent": "LLMSEOToolbox-CLI/0.1 (+https://github.com/ABradwell/llm-seo-toolbox; automated audit)"
+}

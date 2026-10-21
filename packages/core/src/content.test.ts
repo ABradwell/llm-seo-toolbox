@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildContentModel, SNR_PASS } from "@/lib/content";
+import { buildContentModel, SNR_PASS } from "./content";
 
 function filler(word: string, times: number): string {
   return Array.from({ length: times }, () => word).join(" ");
