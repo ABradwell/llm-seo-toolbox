@@ -171,6 +171,17 @@ summary::-webkit-details-marker {
   }
 }
 
+@keyframes fresh {
+  from {
+    color: var(--accent-strong);
+  }
+}
+
+/* Highlights a pipeline finding as it backfills from the audit response. */
+@utility fresh-in {
+  animation: fresh 0.6s ease-out;
+}
+
 @utility rise-in {
   animation: rise 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
 }

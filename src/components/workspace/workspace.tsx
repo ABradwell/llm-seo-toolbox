@@ -18,6 +18,7 @@ import { Logo } from "@/components/logo";
 import { QuickAuditBar } from "@/components/landing/quick-audit-bar";
 import { AuditMatrix } from "@/components/workspace/audit-matrix";
 import { LlmsTxtEditor } from "@/components/workspace/llms-txt-editor";
+import { PipelineLoader } from "@/components/workspace/pipeline-loader";
 import { ScraperSimulator } from "@/components/workspace/scraper-simulator";
 import {
   SiteClassificationPanel,
@@ -26,13 +27,16 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { stepForError } from "@/lib/pipeline-steps";
 import { SAMPLE_TARGETS } from "@/lib/samples";
 import { siteConfig } from "@/lib/site";
 import { isSiteType } from "@/lib/site-types";
 import { scoreTone } from "@/lib/score";
+import { prettyDomain } from "@/lib/url";
 import type { AuditApiError, AuditResult } from "@/types/audit";
 
 interface WorkspaceError {
+  code?: string;
   message: string;
   hint?: string;
 }
@@ -53,6 +57,9 @@ export function Workspace() {
   const override = isSiteType(rawType) ? rawType : null;
 
   const [refreshToken, setRefreshToken] = useState(0);
+  // The URL whose report the pipeline loader has handed off to. Refreshes and
+  // site-type overrides on that URL keep the report on screen instead of replaying.
+  const [revealedUrl, setRevealedUrl] = useState("");
   const [fetchState, setFetchState] = useState<FetchState>({
     key: "",
     url: "",
@@ -83,6 +90,7 @@ export function Workspace() {
             url: rawUrl,
             audit: null,
             error: {
+              code: "error" in payload ? payload.error.code : undefined,
               message:
                 "error" in payload
                   ? payload.error.message
@@ -121,6 +129,12 @@ export function Workspace() {
   const error = settled ? fetchState.error : null;
   const loading = Boolean(rawUrl) && !settled;
   const refresh = useCallback(() => setRefreshToken((token) => token + 1), []);
+  const reveal = useCallback(() => setRevealedUrl(rawUrl), [rawUrl]);
+
+  const reportVisible = Boolean(rawUrl && audit && revealedUrl === rawUrl);
+  const shownAudit = reportVisible ? audit : null;
+  const failedStepId = error ? stepForError(error.code) : null;
+  const showLoader = Boolean(rawUrl) && !reportVisible && (!error || failedStepId !== null);
 
   const selectSiteType = useCallback(
     (selection: SiteTypeSelection) => {
@@ -149,7 +163,9 @@ export function Workspace() {
             />
           </div>
           <div className="ml-auto flex items-center gap-1.5">
-            {audit ? <Badge variant={scoreTone(audit.score)}>score {audit.score}</Badge> : null}
+            {shownAudit ? (
+              <Badge variant={scoreTone(shownAudit.score)}>score {shownAudit.score}</Badge>
+            ) : null}
             <Button asChild variant="ghost" size="sm" className="hidden lg:inline-flex">
               <a href={siteConfig.github} target="_blank" rel="noreferrer">
                 <Github aria-hidden="true" />
@@ -183,13 +199,21 @@ export function Workspace() {
       <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6 sm:py-8">
         {!rawUrl ? <EmptyState /> : null}
 
-        {rawUrl && !audit && loading ? <WorkspaceSkeleton /> : null}
+        {showLoader ? (
+          <PipelineLoader
+            key={requestKey}
+            target={prettyDomain(rawUrl)}
+            audit={settled ? fetchState.audit : null}
+            failedStepId={failedStepId}
+            onComplete={reveal}
+          />
+        ) : null}
 
         {rawUrl && !audit && !loading && error ? (
           <ErrorState error={error} onRetry={refresh} />
         ) : null}
 
-        {rawUrl && audit ? (
+        {reportVisible && audit ? (
           <>
             <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
               <div className="min-w-0">
