@@ -12,8 +12,9 @@
  *
  * A config file contains either an array of jobs or { "jobs": [...] }.
  * Job fields:
- *   name (required), path, width, height, mobile, deviceScaleFactor,
- *   fullPage, scrollTo, waitForText, waitForSelector, settleMs, timeoutMs.
+ *   name (required), path, width, height, mobile, deviceScaleFactor, colorScheme,
+ *   fullPage, scrollTo, clickText, clickSettleMs, waitForText, waitForSelector,
+ *   settleMs, timeoutMs.
  *
  * Default jobs capture the landing page and pipeline at 1440x900 and 390x844,
  * then the workspace with automatic classification and with a portfolio override.
@@ -302,9 +303,34 @@ async function main() {
         enabled: Boolean(job.mobile),
         maxTouchPoints: job.mobile ? 5 : 1,
       });
+      const colorScheme = job.colorScheme ?? "light";
+      if (colorScheme !== "light" && colorScheme !== "dark") {
+        throw new Error(`${job.name}: colorScheme must be "light" or "dark".`);
+      }
+      await send("Emulation.setEmulatedMedia", {
+        features: [{ name: "prefers-color-scheme", value: colorScheme }],
+      });
 
       await send("Page.navigate", { url: `${baseUrl}${job.path ?? "/"}` });
       await sleep(Number(job.settleMs ?? 1200));
+
+      if (job.clickText) {
+        const clicked = await send("Runtime.evaluate", {
+          expression: `(() => {
+            const button = [...document.querySelectorAll("button")].find((node) =>
+              node.textContent?.includes(${JSON.stringify(String(job.clickText))}),
+            );
+            if (!button) return false;
+            button.click();
+            return true;
+          })()`,
+          returnByValue: true,
+        });
+        if (!clicked.result.value) {
+          throw new Error(`${job.name}: could not find a button containing “${job.clickText}”`);
+        }
+        await sleep(Number(job.clickSettleMs ?? 1500));
+      }
 
       if (job.waitForText) {
         const started = Date.now();

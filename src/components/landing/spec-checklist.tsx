@@ -168,7 +168,7 @@ export function SpecChecklist() {
                   className={cn(
                     "inline-flex items-center gap-1.5 rounded-[3px] border px-2.5 py-1.5 font-mono text-[11px] transition-colors disabled:opacity-60",
                     active
-                      ? "border-accent-strong bg-accent-strong text-parchment"
+                      ? "border-accent-strong bg-accent-strong text-on-accent-strong"
                       : "border-line bg-panel/70 text-muted hover:border-line-strong hover:text-foreground",
                   )}
                 >
