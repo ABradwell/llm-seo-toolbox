@@ -28,7 +28,7 @@ export function SiteHeader() {
                 key={item.label}
                 href={item.href}
                 {...(item.external ? { target: "_blank", rel: "noreferrer" } : {})}
-                className="transition-colors hover:text-accent"
+                className="transition-colors hover:text-accent-strong"
               >
                 {item.label}
                 {item.external ? <span className="ml-0.5 text-muted/50">↗</span> : null}

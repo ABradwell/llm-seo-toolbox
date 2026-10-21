@@ -54,7 +54,7 @@ export function FilesTable({ files }: { files: DiscoveryFile[] }) {
                     href={file.url}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex text-muted transition-colors hover:text-accent"
+                    className="inline-flex text-muted transition-colors hover:text-accent-strong"
                     aria-label={`Open ${file.label}`}
                   >
                     <ArrowUpRight className="size-3.5" aria-hidden="true" />

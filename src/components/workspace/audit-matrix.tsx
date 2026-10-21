@@ -74,7 +74,7 @@ export function AuditMatrix({
                   href={audit.finalUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-1 transition-colors hover:text-accent"
+                  className="inline-flex items-center gap-1 transition-colors hover:text-accent-strong"
                 >
                   {audit.domain}
                   <ExternalLink className="size-2.5" aria-hidden="true" />
@@ -182,7 +182,7 @@ export function AuditMatrix({
                   <a href={`#check-${fix.pillarId}-${fix.checkId}`} className="group block">
                     <div className="flex items-center gap-2">
                       <StatusIcon status={fix.status} />
-                      <span className="min-w-0 flex-1 truncate text-xs font-medium group-hover:text-accent">
+                      <span className="min-w-0 flex-1 truncate text-xs font-medium group-hover:text-accent-strong">
                         {fix.label}
                       </span>
                       <span className="font-mono text-[9px] text-muted uppercase">
@@ -347,7 +347,7 @@ function CheckRow({
           <span className="font-mono text-[10px] text-muted">
             {check.evidence?.file ?? "—"}
             {check.evidence?.line ? (
-              <span className="text-accent/80">:{check.evidence.line}</span>
+              <span className="text-accent-strong">:{check.evidence.line}</span>
             ) : null}
           </span>
         </td>
@@ -362,7 +362,7 @@ function CheckRow({
             onClick={() => setOpen((value) => !value)}
             aria-expanded={open}
             aria-controls={detailId}
-            className="inline-flex items-center gap-1 font-mono text-[10px] text-muted transition-colors hover:text-accent"
+            className="inline-flex items-center gap-1 font-mono text-[10px] text-muted transition-colors hover:text-accent-strong"
           >
             {open ? "hide" : "inspect"}
             <ChevronDown

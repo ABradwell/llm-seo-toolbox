@@ -213,7 +213,7 @@ export function SpecChecklist() {
             {state.kind === "ready" ? (
               <Link
                 href={`/app?url=${encodeURIComponent(state.target.url)}`}
-                className="inline-flex items-center gap-1 text-accent hover:underline"
+                className="inline-flex items-center gap-1 text-accent-strong hover:underline"
               >
                 Open full matrix
                 <ArrowRight className="size-3" aria-hidden="true" />
@@ -251,7 +251,7 @@ export function SpecChecklist() {
                     href={group.href}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-1 font-mono text-[10px] text-muted transition-colors hover:text-accent"
+                    className="inline-flex items-center gap-1 font-mono text-[10px] text-muted transition-colors hover:text-accent-strong"
                   >
                     {group.spec}
                     <ExternalLink className="size-2.5" aria-hidden="true" />
