@@ -5,23 +5,24 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 rounded-lg text-sm font-medium whitespace-nowrap transition-all duration-200 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+  "inline-flex items-center justify-center gap-2 rounded-[3px] font-mono text-xs font-medium tracking-wide whitespace-nowrap transition-colors disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0",
   {
     variants: {
       variant: {
-        default:
-          "bg-acid text-[#0a0d09] shadow-[0_0_0_1px_rgba(200,241,105,0.4)] hover:bg-acid-strong",
+        default: "bg-accent text-[#0a0d09] hover:bg-accent-strong",
         secondary:
-          "border border-line bg-panel-2 text-foreground hover:border-acid/40 hover:bg-panel",
-        outline: "border border-line bg-transparent text-foreground hover:bg-panel-2",
+          "border border-line bg-panel-2 text-foreground hover:border-line-strong hover:bg-panel-3",
+        outline: "border border-line bg-transparent text-foreground hover:border-accent/50",
         ghost: "text-muted hover:bg-panel-2 hover:text-foreground",
-        link: "text-acid underline-offset-4 hover:underline",
+        danger: "border border-fail/40 bg-fail/10 text-fail hover:bg-fail/20",
+        link: "text-accent underline-offset-4 hover:underline",
       },
       size: {
-        sm: "h-8 px-3 text-xs [&_svg]:size-3.5",
-        default: "h-10 px-4 [&_svg]:size-4",
-        lg: "h-12 px-6 text-base [&_svg]:size-5",
-        icon: "size-10 [&_svg]:size-4",
+        sm: "h-7 px-2.5 text-[11px] [&_svg]:size-3.5",
+        default: "h-9 px-3.5 [&_svg]:size-4",
+        lg: "h-11 px-5 text-sm [&_svg]:size-4",
+        icon: "size-9 [&_svg]:size-4",
+        "icon-sm": "size-7 [&_svg]:size-3.5",
       },
     },
     defaultVariants: {

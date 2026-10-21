@@ -3,11 +3,12 @@
 import { Eye, FileText, Scissors, Sigma } from "lucide-react";
 
 import { CopyButton } from "@/components/copy-button";
+import { LineNumberedCode } from "@/components/workspace/code-pane";
 import { Badge } from "@/components/ui/badge";
 import { formatBytes, formatNumber } from "@/lib/utils";
 import type { AuditResult } from "@/types/audit";
 
-export function VisionSimulator({ audit }: { audit: AuditResult }) {
+export function ScraperSimulator({ audit }: { audit: AuditResult }) {
   const vision = audit.vision;
   const removedTotal =
     vision.removed.scripts +
@@ -17,8 +18,8 @@ export function VisionSimulator({ audit }: { audit: AuditResult }) {
     vision.removed.frames;
 
   return (
-    <div className="space-y-6">
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    <div className="space-y-3">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           icon={FileText}
           label="HTML as served"
@@ -45,21 +46,21 @@ export function VisionSimulator({ audit }: { audit: AuditResult }) {
         />
       </div>
 
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-2xl border border-line bg-panel/40 px-5 py-4">
-        <span className="font-mono text-[11px] tracking-[0.16em] text-muted uppercase">
-          Stripped before parsing
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-[4px] border border-line bg-panel/60 px-3 py-2.5">
+        <span className="font-mono text-[9px] tracking-[0.14em] text-muted uppercase">
+          stripped before parsing
         </span>
         <NoiseCount label="scripts" value={vision.removed.scripts} />
         <NoiseCount label="style blocks" value={vision.removed.styles} />
         <NoiseCount label="chrome landmarks" value={vision.removed.landmarks} />
         <NoiseCount label="inline SVG" value={vision.removed.svg} />
         <NoiseCount label="iframes" value={vision.removed.frames} />
-        <span className="ml-auto font-mono text-xs text-muted/70">
+        <span className="ml-auto font-mono text-[10px] text-muted/60">
           {formatNumber(removedTotal)} elements removed
         </span>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-2">
+      <div className="grid gap-3 xl:grid-cols-2">
         <CodePane
           title="Raw HTML"
           badge="noise included"
@@ -77,10 +78,10 @@ export function VisionSimulator({ audit }: { audit: AuditResult }) {
         />
       </div>
 
-      <p className="text-sm leading-relaxed text-muted/80">
-        This simulation follows the same path an AI crawler takes: fetch the initial HTML, discard
-        scripts, styles, and chrome, then convert what remains into text. Content that only appears
-        after client-side JavaScript will not be here.
+      <p className="text-[11px] leading-relaxed text-muted/80">
+        This follows the same path as a non-JS crawler: fetch the initial HTML, discard scripts,
+        styles and chrome, then convert what remains into text. Content that only appears after
+        client-side JavaScript will not be here.
       </p>
     </div>
   );
@@ -98,21 +99,21 @@ function StatCard({
   sub: string;
 }) {
   return (
-    <div className="rounded-2xl border border-line bg-panel/60 p-5">
-      <div className="flex items-center gap-2">
-        <Icon className="size-4 text-acid" aria-hidden="true" />
-        <p className="font-mono text-[11px] tracking-[0.14em] text-muted uppercase">{label}</p>
+    <div className="rounded-[4px] border border-line bg-panel p-3.5">
+      <div className="flex items-center gap-1.5">
+        <Icon className="size-3.5 text-accent" aria-hidden="true" />
+        <p className="font-mono text-[9px] tracking-[0.12em] text-muted uppercase">{label}</p>
       </div>
-      <p className="mt-4 text-2xl font-medium tracking-tight">{value}</p>
-      <p className="mt-1 text-xs text-muted">{sub}</p>
+      <p className="mt-2 font-mono text-xl tracking-tight">{value}</p>
+      <p className="mt-0.5 text-[10px] text-muted">{sub}</p>
     </div>
   );
 }
 
 function NoiseCount({ label, value }: { label: string; value: number }) {
   return (
-    <span className="flex items-center gap-2 text-sm">
-      <span className="font-mono text-foreground">{value}</span>
+    <span className="flex items-center gap-1.5 font-mono text-[10px]">
+      <span className="text-foreground">{value}</span>
       <span className="text-muted">{label}</span>
     </span>
   );
@@ -137,26 +138,24 @@ function CodePane({
     <section
       className={
         highlight
-          ? "flex min-h-[420px] flex-col overflow-hidden rounded-2xl border border-acid/25 bg-panel/70"
-          : "flex min-h-[420px] flex-col overflow-hidden rounded-2xl border border-line bg-panel/50"
+          ? "flex min-h-[420px] min-w-0 flex-col overflow-hidden rounded-[4px] border border-accent/25 bg-panel"
+          : "flex min-h-[420px] min-w-0 flex-col overflow-hidden rounded-[4px] border border-line bg-panel/60"
       }
     >
-      <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-3.5">
+      <div className="flex items-center justify-between gap-2 border-b border-line px-3 py-2.5">
         <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <h3 className="text-sm font-medium">{title}</h3>
+          <div className="flex items-center gap-1.5">
+            <h3 className="font-mono text-[11px]">{title}</h3>
             <Badge variant={highlight ? "accent" : "default"}>{badge}</Badge>
           </div>
-          <p className="mt-1 truncate font-mono text-xs text-muted">{subtitle}</p>
+          <p className="mt-0.5 truncate font-mono text-[9px] text-muted">{subtitle}</p>
         </div>
         <CopyButton value={value} label="Copy" />
       </div>
-      <pre
-        className="max-h-[560px] flex-1 overflow-auto p-5 font-mono text-[12.5px] leading-relaxed whitespace-pre-wrap text-foreground/85"
-        data-language={language}
-      >
-        <code>{value}</code>
-      </pre>
+      <LineNumberedCode value={value} maxHeight="max-h-[560px]" className="flex-1" />
+      <div className="border-t border-line px-3 py-1.5 font-mono text-[9px] tracking-[0.1em] text-muted/50 uppercase">
+        {language}
+      </div>
     </section>
   );
 }

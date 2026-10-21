@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { crawlerAccess, evaluatePath, parseRobots, selectGroups } from "./robots";
+import {
+  crawlerAccess,
+  evaluatePath,
+  hasExplicitAiPolicy,
+  parseRobots,
+  selectGroups,
+} from "./robots";
 
 const ROBOTS = `
 # sample policy
@@ -35,6 +41,17 @@ describe("parseRobots", () => {
     const data = parseRobots("\n\n# nothing here\nnot a directive\n");
     expect(data.groups).toHaveLength(0);
     expect(data.sitemaps).toHaveLength(0);
+  });
+
+  it("records 1-based source lines for groups, rules and sitemaps", () => {
+    const data = parseRobots(ROBOTS);
+
+    expect(data.groups[0].line).toBe(3);
+    expect(data.groups[0].rules.map((rule) => rule.line)).toEqual([4, 5]);
+    expect(data.groups[1].line).toBe(7);
+    expect(data.groups[2].line).toBe(10);
+    expect(data.groups[2].rules.map((rule) => rule.line)).toEqual([11, 12]);
+    expect(data.sitemapLines).toEqual([14]);
   });
 });
 
@@ -81,5 +98,31 @@ describe("crawlerAccess", () => {
   it("treats a missing robots.txt as allowed", () => {
     const missing = parseRobots("");
     expect(crawlerAccess(missing, "GPTBot").status).toBe("pass");
+  });
+
+  it("returns the matching rule line for blocked and allowed crawlers", () => {
+    const data = parseRobots(ROBOTS);
+
+    expect(crawlerAccess(data, "GPTBot").line).toBe(8);
+    expect(crawlerAccess(data, "PerplexityBot").line).toBe(5);
+    expect(crawlerAccess(data, "ClaudeBot").line).toBe(10);
+  });
+
+  it("marks crawler access as explicit only when the crawler is named", () => {
+    const data = parseRobots(ROBOTS);
+
+    expect(crawlerAccess(data, "ClaudeBot").explicit).toBe(true);
+    expect(crawlerAccess(data, "PerplexityBot").explicit).toBe(false);
+  });
+});
+
+describe("hasExplicitAiPolicy", () => {
+  it("detects a named AI crawler group", () => {
+    expect(hasExplicitAiPolicy(parseRobots(ROBOTS))).toBe(true);
+  });
+
+  it("is false for wildcard-only policies and missing robots.txt", () => {
+    expect(hasExplicitAiPolicy(parseRobots("User-agent: *\nDisallow: /admin\n"))).toBe(false);
+    expect(hasExplicitAiPolicy(parseRobots(""))).toBe(false);
   });
 });

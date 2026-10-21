@@ -4,129 +4,114 @@ import Link from "next/link";
 import { Logo } from "@/components/logo";
 import { siteConfig } from "@/lib/site";
 
-const REPO_URL = siteConfig.github;
-const DEPLOY_URL = `https://vercel.com/new/clone?repository-url=${encodeURIComponent(REPO_URL)}`;
+const COLUMNS: {
+  label: string;
+  links: { label: string; href: string; external?: boolean }[];
+}[] = [
+  {
+    label: "Product",
+    links: [
+      { label: "Audit workspace", href: "/app" },
+      { label: "Live checklist", href: "/#checklist" },
+      { label: "API", href: "/api/audit?url=example.com" },
+    ],
+  },
+  {
+    label: "Standards",
+    links: [
+      { label: "llms.txt", href: siteConfig.llmsTxtSpec, external: true },
+      { label: "RFC 9309", href: siteConfig.rfc9309, external: true },
+      { label: "schema.org", href: siteConfig.schema, external: true },
+    ],
+  },
+  {
+    label: "Project",
+    links: [
+      { label: "Source", href: siteConfig.github, external: true },
+      { label: "Deploy on Vercel", href: siteConfig.vercelDeploy, external: true },
+      { label: "Buy me a coffee", href: siteConfig.coffee, external: true },
+    ],
+  },
+];
 
 export function SiteFooter() {
   return (
     <footer className="border-t border-line">
-      <div className="mx-auto w-full max-w-7xl px-4 py-14 sm:px-6">
-        <div className="grid gap-10 md:grid-cols-[1.4fr_1fr_1fr_1fr]">
+      <div className="mx-auto w-full max-w-7xl px-4 py-10 sm:px-6">
+        <div className="grid gap-8 md:grid-cols-[1.4fr_1fr_1fr_1fr]">
           <div>
             <Logo />
-            <p className="mt-4 max-w-xs text-sm leading-relaxed text-muted">
+            <p className="mt-3 max-w-xs text-xs leading-relaxed text-muted">
               {siteConfig.description}
             </p>
+            <div className="mt-4 flex items-center gap-3 font-mono text-[10px] text-muted">
+              <a
+                href={siteConfig.github}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 transition-colors hover:text-accent"
+              >
+                <Github className="size-3" aria-hidden="true" />
+                GitHub
+              </a>
+              <a
+                href={siteConfig.coffee}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 transition-colors hover:text-accent"
+              >
+                <Coffee className="size-3" aria-hidden="true" />
+                BMC
+              </a>
+              <a
+                href={siteConfig.vercelDeploy}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 transition-colors hover:text-accent"
+              >
+                <Triangle className="size-3" aria-hidden="true" />
+                Vercel
+              </a>
+            </div>
           </div>
 
-          <div>
-            <p className="font-mono text-[11px] tracking-[0.16em] text-muted uppercase">Product</p>
-            <ul className="mt-4 space-y-3 text-sm">
-              <li>
-                <Link href="/app" className="transition-colors hover:text-acid">
-                  Audit workspace
-                </Link>
-              </li>
-              <li>
-                <Link href="/#samples" className="transition-colors hover:text-acid">
-                  Sample scans
-                </Link>
-              </li>
-              <li>
-                <Link href="/#pillars" className="transition-colors hover:text-acid">
-                  Scoring model
-                </Link>
-              </li>
-            </ul>
-          </div>
-
-          <div>
-            <p className="font-mono text-[11px] tracking-[0.16em] text-muted uppercase">
-              Standards
-            </p>
-            <ul className="mt-4 space-y-3 text-sm">
-              <li>
-                <a
-                  href={siteConfig.llmsTxtSpec}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="transition-colors hover:text-acid"
-                >
-                  llms.txt proposal ↗
-                </a>
-              </li>
-              <li>
-                <a
-                  href="https://www.rfc-editor.org/rfc/rfc9309"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="transition-colors hover:text-acid"
-                >
-                  RFC 9309 robots.txt ↗
-                </a>
-              </li>
-              <li>
-                <a
-                  href="https://schema.org/"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="transition-colors hover:text-acid"
-                >
-                  schema.org ↗
-                </a>
-              </li>
-            </ul>
-          </div>
-
-          <div>
-            <p className="font-mono text-[11px] tracking-[0.16em] text-muted uppercase">
-              Community
-            </p>
-            <ul className="mt-4 space-y-3 text-sm">
-              <li>
-                <a
-                  href={REPO_URL}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-2 transition-colors hover:text-acid"
-                >
-                  <Github className="size-4" aria-hidden="true" />
-                  Star the repo
-                </a>
-              </li>
-              <li>
-                <a
-                  href={siteConfig.coffee}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-2 transition-colors hover:text-acid"
-                >
-                  <Coffee className="size-4" aria-hidden="true" />
-                  Buy me a coffee
-                </a>
-              </li>
-              <li>
-                <a
-                  href={DEPLOY_URL}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-2 transition-colors hover:text-acid"
-                >
-                  <Triangle className="size-4" aria-hidden="true" />
-                  Deploy with Vercel
-                </a>
-              </li>
-            </ul>
-          </div>
+          {COLUMNS.map((column) => (
+            <div key={column.label}>
+              <p className="font-mono text-[10px] tracking-[0.16em] text-muted uppercase">
+                {column.label}
+              </p>
+              <ul className="mt-3 space-y-2">
+                {column.links.map((item) => (
+                  <li key={item.label}>
+                    {item.external ? (
+                      <a
+                        href={item.href}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-mono text-[11px] text-muted transition-colors hover:text-accent"
+                      >
+                        {item.label} ↗
+                      </a>
+                    ) : (
+                      <Link
+                        href={item.href}
+                        className="font-mono text-[11px] text-muted transition-colors hover:text-accent"
+                      >
+                        {item.label}
+                      </Link>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
         </div>
 
-        <div className="mt-12 flex flex-wrap items-center justify-between gap-4 border-t border-line pt-6">
-          <p className="font-mono text-xs text-muted">
-            GPL-3.0 licensed · Built for the crawlers, not the vibes
-          </p>
-          <p className="flex items-center gap-2 font-mono text-xs text-muted">
-            <span className="size-1.5 animate-pulse rounded-full bg-pass" aria-hidden="true" />
-            Vercel-ready deployment
+        <div className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4 font-mono text-[10px] text-muted/70">
+          <p>GPL-3.0-only · © 2026 LLMReady contributors</p>
+          <p className="flex items-center gap-2">
+            <span className="size-1.5 rounded-full bg-pass" aria-hidden="true" />
+            CI: format · lint · typecheck · test · build · gitleaks
           </p>
         </div>
       </div>

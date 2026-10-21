@@ -3,8 +3,8 @@ import { cn } from "@/lib/utils";
 
 export function ScoreRing({
   score,
-  size = 160,
-  strokeWidth = 8,
+  size = 132,
+  strokeWidth = 7,
   gradeLabel,
   className,
 }: {
@@ -31,7 +31,7 @@ export function ScoreRing({
           cy={size / 2}
           r={radius}
           fill="none"
-          stroke="rgba(240,242,232,0.09)"
+          stroke="rgba(250,250,250,0.09)"
           strokeWidth={strokeWidth}
         />
         <circle
@@ -41,21 +41,18 @@ export function ScoreRing({
           fill="none"
           stroke={toneColor(tone)}
           strokeWidth={strokeWidth}
-          strokeLinecap="round"
+          strokeLinecap="butt"
           strokeDasharray={circumference}
           strokeDashoffset={offset}
           className="transition-[stroke-dashoffset] duration-700 ease-out"
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span
-          className="font-semibold tracking-tight"
-          style={{ fontSize: size * 0.28, lineHeight: 1 }}
-        >
+        <span className="font-mono tracking-tight" style={{ fontSize: size * 0.27, lineHeight: 1 }}>
           {clamped}
         </span>
         {gradeLabel ? (
-          <span className="mt-1 font-mono text-[10px] tracking-[0.16em] text-muted uppercase">
+          <span className="mt-1 font-mono text-[9px] tracking-[0.16em] text-muted uppercase">
             {gradeLabel}
           </span>
         ) : null}

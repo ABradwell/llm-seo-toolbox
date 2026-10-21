@@ -1,0 +1,26 @@
+# LLMReady
+
+> An open-source spec-compliance auditor for AI discovery. Validate /llms.txt, RFC 9309 robots.txt, static HTML signal-to-noise and schema.org metadata.
+
+## Product
+
+- [Audit workspace](https://github.com/aiden/llm-seo-toolbox#readme): Run the 20-check audit matrix and inspect line-level fixes.
+- [Live specification checklist](https://github.com/aiden/llm-seo-toolbox#scoring-model): The checks the audit enforces, with pass conditions.
+- [API](https://github.com/aiden/llm-seo-toolbox#api): `GET /api/audit?url=example.com` returns the full JSON report.
+
+## Standards
+
+- [llms.txt specification](https://llmstxt.org/): The manifest structure this project validates.
+- [RFC 9309](https://www.rfc-editor.org/rfc/rfc9309): Robots Exclusion Protocol.
+- [schema.org](https://schema.org/): Structured data vocabularies used by the audit.
+
+## Project
+
+- [Source code](https://github.com/aiden/llm-seo-toolbox): GPL-3.0-only.
+- [Deploy on Vercel](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Faiden%2Fllm-seo-toolbox): One-click deployment.
+- [Buy me a coffee](https://www.buymeacoffee.com): Support the project.
+
+## Optional
+
+- [Issues](https://github.com/aiden/llm-seo-toolbox/issues): Report a bug or request a check.
+- [Contributing](https://github.com/aiden/llm-seo-toolbox/blob/main/README.md#contributing): Run the full validation suite before opening a PR.

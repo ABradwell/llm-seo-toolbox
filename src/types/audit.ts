@@ -1,11 +1,33 @@
 export type CheckStatus = "pass" | "warn" | "fail" | "info";
 
-export type PillarId = "discovery" | "access" | "semantic" | "structured";
+/**
+ * V2 pillars follow the standards the audit actually enforces:
+ * discovery manifests, RFC 9309 access, static parseability and
+ * structured machine interfaces.
+ */
+export type PillarId = "discovery" | "access" | "parseability" | "structured";
 
 export type AuditGrade = "A" | "B" | "C" | "D" | "F";
 
+export interface CheckEvidence {
+  /** Request path or document the evidence came from, e.g. `/robots.txt`. */
+  file: string;
+  /** 1-based line number, or null when the source is a header/missing file. */
+  line: number | null;
+  /** The exact source line or a short excerpt. */
+  snippet: string | null;
+}
+
+export type FixLanguage = "markdown" | "robots" | "html" | "json" | "http" | "yaml" | "text";
+
+export interface CheckFix {
+  language: FixLanguage;
+  /** A copy-pasteable snippet that resolves the check. */
+  code: string;
+}
+
 export interface AuditCheck {
-  /** Stable identifier, used for keys and tests. */
+  /** Stable identifier, used for keys, tests and the live landing checklist. */
   id: string;
   label: string;
   status: CheckStatus;
@@ -15,6 +37,12 @@ export interface AuditCheck {
   detail: string;
   /** Actionable next step, only meaningful for warn/fail checks. */
   recommendation?: string;
+  /** RFC or specification the check enforces. */
+  protocol?: string;
+  /** Where the evidence lives, with an exact line when one exists. */
+  evidence?: CheckEvidence;
+  /** Code-level resolution snippet shown in the audit matrix. */
+  fix?: CheckFix;
   /** Relative importance inside its pillar. Defaults to 1. */
   weight: number;
 }
@@ -94,6 +122,8 @@ export interface AuditFix {
   status: CheckStatus;
   summary: string;
   recommendation: string;
+  evidence?: CheckEvidence;
+  fix?: CheckFix;
 }
 
 export interface AuditMeta {

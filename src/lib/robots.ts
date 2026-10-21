@@ -1,17 +1,23 @@
 export interface RobotsRule {
   type: "allow" | "disallow";
   path: string;
+  /** 1-based line in robots.txt. */
+  line: number;
 }
 
 export interface RobotsGroup {
   agents: string[];
   rules: RobotsRule[];
+  /** 1-based line of the first user-agent directive in the group. */
+  line: number;
 }
 
 export interface RobotsData {
   exists: boolean;
   groups: RobotsGroup[];
   sitemaps: string[];
+  /** 1-based lines of the Sitemap: directives, parallel to `sitemaps`. */
+  sitemapLines: number[];
   crawlDelay: number | null;
 }
 
@@ -51,26 +57,30 @@ export const AI_CRAWLERS = [
 export type AiCrawler = (typeof AI_CRAWLERS)[number];
 
 export function emptyRobots(): RobotsData {
-  return { exists: false, groups: [], sitemaps: [], crawlDelay: null };
+  return { exists: false, groups: [], sitemaps: [], sitemapLines: [], crawlDelay: null };
 }
 
 export function parseRobots(text: string): RobotsData {
   const groups: RobotsGroup[] = [];
   const sitemaps: string[] = [];
+  const sitemapLines: number[] = [];
   let crawlDelay: number | null = null;
   let agents: string[] = [];
   let rules: RobotsRule[] = [];
+  let groupLine = 1;
 
   const pushGroup = () => {
     if (agents.length > 0) {
-      groups.push({ agents: [...agents], rules: [...rules] });
+      groups.push({ agents: [...agents], rules: [...rules], line: groupLine });
     }
     agents = [];
     rules = [];
   };
 
-  for (const rawLine of text.split(/\r?\n/)) {
-    const line = rawLine.replace(/#.*$/, "").trim();
+  const lines = text.split(/\r?\n/);
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index].replace(/#.*$/, "").trim();
     if (!line) continue;
 
     const separator = line.indexOf(":");
@@ -78,21 +88,24 @@ export function parseRobots(text: string): RobotsData {
 
     const field = line.slice(0, separator).trim().toLowerCase();
     const value = line.slice(separator + 1).trim();
+    const lineNumber = index + 1;
 
     if (field === "user-agent") {
       if (rules.length > 0) pushGroup();
+      if (agents.length === 0) groupLine = lineNumber;
       if (value) agents.push(value.toLowerCase());
       continue;
     }
 
     if (field === "allow" || field === "disallow") {
       if (agents.length === 0) continue;
-      rules.push({ type: field, path: value });
+      rules.push({ type: field, path: value, line: lineNumber });
       continue;
     }
 
     if (field === "sitemap" && value) {
       sitemaps.push(value);
+      sitemapLines.push(lineNumber);
       continue;
     }
 
@@ -104,7 +117,7 @@ export function parseRobots(text: string): RobotsData {
 
   pushGroup();
 
-  return { exists: true, groups, sitemaps, crawlDelay };
+  return { exists: true, groups, sitemaps, sitemapLines, crawlDelay };
 }
 
 function escapeRegExp(value: string): string {
@@ -146,7 +159,7 @@ export function evaluatePath(groups: RobotsGroup[], path: string): RobotsVerdict
   for (const group of groups) {
     for (const rule of group.rules) {
       if (rule.path === "") {
-        candidates.push({ rule: { type: "allow", path: "" }, index: 0 });
+        candidates.push({ rule: { type: "allow", path: "", line: rule.line }, index: 0 });
         continue;
       }
       if (matchesRule(rule.path, path)) {
@@ -176,6 +189,10 @@ export interface CrawlerAccess {
   summary: string;
   detail: string;
   scope: "specific" | "wildcard" | "none" | "missing";
+  /** Whether a group explicitly names this crawler. */
+  explicit: boolean;
+  /** 1-based line of the matching rule or group, when robots.txt exists. */
+  line: number | null;
 }
 
 export function crawlerAccess(data: RobotsData, bot: string, path = "/"): CrawlerAccess {
@@ -183,13 +200,16 @@ export function crawlerAccess(data: RobotsData, bot: string, path = "/"): Crawle
     return {
       status: "pass",
       scope: "missing",
+      explicit: false,
+      line: null,
       summary: "Allowed by default",
       detail: "No robots.txt was found, so crawlers are not restricted.",
     };
   }
 
   const target = bot.toLowerCase();
-  const hasSpecific = data.groups.some((group) => group.agents.some((agent) => agent === target));
+  const specificGroup = data.groups.find((group) => group.agents.some((agent) => agent === target));
+  const hasSpecific = Boolean(specificGroup);
   const groups = selectGroups(data, bot);
   const verdict = evaluatePath(groups, path);
 
@@ -197,17 +217,24 @@ export function crawlerAccess(data: RobotsData, bot: string, path = "/"): Crawle
     return {
       status: "pass",
       scope: "none",
+      explicit: false,
+      line: null,
       summary: "Allowed by default",
       detail: "robots.txt has no rule for this crawler, so access is unrestricted.",
     };
   }
 
   const scope = hasSpecific ? "specific" : "wildcard";
+  const line = hasSpecific
+    ? (verdict.matchedRule?.line ?? specificGroup?.line ?? null)
+    : (verdict.matchedRule?.line ?? null);
 
   if (!verdict.allowed && verdict.matchedRule) {
     return {
       status: "fail",
       scope,
+      explicit: hasSpecific,
+      line,
       summary: "Blocked",
       detail: hasSpecific
         ? `A rule targeting this crawler blocks ${path}: Disallow: ${verdict.matchedRule.path || "/"}.`
@@ -218,11 +245,19 @@ export function crawlerAccess(data: RobotsData, bot: string, path = "/"): Crawle
   return {
     status: "pass",
     scope,
+    explicit: hasSpecific,
+    line,
     summary: hasSpecific ? "Explicitly allowed" : "Allowed by wildcard",
     detail: hasSpecific
       ? "A rule targeting this crawler explicitly allows it."
       : "No crawler-specific rule exists, and the wildcard group allows it.",
   };
+}
+
+/** True when robots.txt contains a group that names an AI crawler explicitly. */
+export function hasExplicitAiPolicy(data: RobotsData): boolean {
+  const agents = new Set(AI_CRAWLERS.map((crawler) => crawler.label.toLowerCase()));
+  return data.groups.some((group) => group.agents.some((agent) => agents.has(agent)));
 }
 
 export function isPathBlocked(data: RobotsData, path = "/"): boolean {

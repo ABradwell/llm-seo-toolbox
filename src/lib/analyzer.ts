@@ -8,17 +8,29 @@ import type {
   AuditPage,
   AuditPillar,
   AuditResult,
+  CheckEvidence,
+  CheckFix,
   CheckStatus,
   DiscoveryFile,
+  FixLanguage,
   RemovedNoise,
   SiteProfile,
   VisionPayload,
 } from "@/types/audit";
 
-import { buildContentModel, type ContentModel } from "./content";
+import { buildContentModel, SNR_PASS, SNR_WARN, type ContentModel } from "./content";
+import { evaluateMetaRobots, evaluateXRobotsTag } from "./directives";
 import { fetchText, type FetchTextOutcome } from "./fetch-page";
 import { sectionForPath } from "./llms";
-import { AI_CRAWLERS, crawlerAccess, emptyRobots, parseRobots, type RobotsData } from "./robots";
+import { validateLlmsTxt, type LlmsTxtValidation } from "./llms-txt";
+import {
+  AI_CRAWLERS,
+  crawlerAccess,
+  emptyRobots,
+  hasExplicitAiPolicy,
+  parseRobots,
+  type RobotsData,
+} from "./robots";
 import { gradeFor, scoreAudit, scorePillar } from "./score";
 import { assertSafeUrl, UnsafeUrlError } from "./security";
 import { isIndexablePage, looksLikeHtml, parseSitemap } from "./sitemap";
@@ -31,6 +43,9 @@ const MAX_PAGES = 80;
 const STANDARD_TIMEOUT_MS = 6_000;
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const CACHE_MAX_ENTRIES = 30;
+
+/** schema.org types V2 treats as the machine-readable baseline. */
+const RECOMMENDED_SCHEMA_TYPES = ["TechArticle", "FAQPage", "SoftwareApplication"] as const;
 
 export class AuditError extends Error {
   readonly code: string;
@@ -75,8 +90,33 @@ function check(input: Omit<AuditCheck, "weight"> & { weight?: number }): AuditCh
   return { weight: input.weight ?? 1, ...input };
 }
 
+function fix(language: FixLanguage, code: string): CheckFix {
+  return { language, code: code.trim() };
+}
+
 function byteLength(value: string): number {
   return Buffer.byteLength(value, "utf8");
+}
+
+/** Returns a source line as evidence, trimmed and capped for transport. */
+function evidenceAt(file: string, line: number | null, source?: string): CheckEvidence {
+  if (line === null) return { file, line: null, snippet: null };
+  const snippet = source?.split(/\r?\n/)[line - 1]?.trim() ?? null;
+  return { file, line, snippet: snippet ? snippet.slice(0, 240) : null };
+}
+
+function lineOfFirstMatch(source: string, pattern: RegExp): number | null {
+  const lines = source.split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    if (pattern.test(lines[index])) return index + 1;
+  }
+  return null;
+}
+
+function sourceLine(element: unknown): number | null {
+  if (!element || typeof element !== "object") return null;
+  const location = (element as { sourceCodeLocation?: { startLine?: number } }).sourceCodeLocation;
+  return location?.startLine ?? null;
 }
 
 function truncateForTransport(value: string, limit: number): { text: string; truncated: boolean } {
@@ -89,12 +129,21 @@ function probeErrorMessage(error: unknown): string {
   return "The site could not be fetched.";
 }
 
+function plural(count: number, singular: string, pluralForm = `${singular}s`): string {
+  return `${formatNumber(count)} ${count === 1 ? singular : pluralForm}`;
+}
+
+// ---------------------------------------------------------------------------
+// Fetching helpers
+// ---------------------------------------------------------------------------
+
 interface SitemapBudget {
   remaining: number;
   fetched: number;
   childCount: number;
   lastStatus: number | null;
   foundXml: boolean;
+  firstUrlLine: number | null;
 }
 
 async function expandSitemap(url: string, budget: SitemapBudget, depth = 0): Promise<string[]> {
@@ -116,6 +165,9 @@ async function expandSitemap(url: string, budget: SitemapBudget, depth = 0): Pro
   if (parsed.kind === "unknown") return [];
 
   budget.foundXml = true;
+  if (budget.firstUrlLine === null && parsed.urls.length > 0) {
+    budget.firstUrlLine = lineOfFirstMatch(response.body, /<loc[\s>]/i) ?? 1;
+  }
 
   if (parsed.kind === "urlset") return parsed.urls;
 
@@ -135,6 +187,7 @@ interface SitemapOutcome {
   note: string;
   bytes: number;
   primaryUrl: string;
+  firstUrlLine: number | null;
 }
 
 async function loadSitemap(
@@ -148,12 +201,12 @@ async function loadSitemap(
     childCount: 0,
     lastStatus: primary.status || null,
     foundXml: false,
+    firstUrlLine: null,
   };
 
   const primaryUrl = new URL("/sitemap.xml", origin).toString();
   let urls = await expandSitemap(primaryUrl, budget);
   let primaryUrlUsed = primaryUrl;
-  const bytes = primary.bytes;
 
   if (urls.length === 0) {
     const directives = robots.sitemaps
@@ -194,8 +247,9 @@ async function loadSitemap(
     urls: unique,
     filesFetched: budget.fetched,
     lastStatus: budget.lastStatus,
-    bytes,
+    bytes: primary.bytes,
     primaryUrl: primaryUrlUsed,
+    firstUrlLine: budget.firstUrlLine,
     note: found
       ? `${formatNumber(unique.length)} URLs across ${budget.fetched} file${budget.fetched === 1 ? "" : "s"}`
       : primary.status === 404
@@ -242,7 +296,7 @@ async function probeOpenApi(origin: string): Promise<ProbeResult> {
       url: null,
       status: null,
       bytes: 0,
-      detail: "No OpenAPI description found at the usual locations.",
+      detail: "No OpenAPI description was found at /openapi.json or the usual .well-known paths.",
     };
   }
 
@@ -313,15 +367,28 @@ async function probeWellKnown(origin: string): Promise<ProbeResult & { entries: 
   };
 }
 
+// ---------------------------------------------------------------------------
+// Document extraction
+// ---------------------------------------------------------------------------
+
+interface JsonLdBlock {
+  line: number | null;
+  valid: boolean;
+  types: string[];
+  hasContext: boolean;
+}
+
 interface JsonLdReport {
   valid: number;
   invalid: number;
   types: string[];
+  blocks: JsonLdBlock[];
+  firstValidLine: number | null;
+  firstBlockLine: number | null;
 }
 
 function extractJsonLd($: cheerio.CheerioAPI): JsonLdReport {
-  let valid = 0;
-  let invalid = 0;
+  const blocks: JsonLdBlock[] = [];
   const types = new Set<string>();
 
   const collectTypes = (value: unknown): void => {
@@ -343,16 +410,48 @@ function extractJsonLd($: cheerio.CheerioAPI): JsonLdReport {
 
   $('script[type="application/ld+json"]').each((_, element) => {
     const raw = $(element).text().trim();
+    const line = sourceLine(element);
     if (!raw) return;
+
     try {
-      collectTypes(JSON.parse(raw));
-      valid += 1;
+      const parsed: unknown = JSON.parse(raw);
+      const record =
+        parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+      collectTypes(parsed);
+      blocks.push({
+        line,
+        valid: true,
+        types: record && typeof record["@type"] === "string" ? [record["@type"]] : [],
+        hasContext: Boolean(record?.["@context"]),
+      });
     } catch {
-      invalid += 1;
+      blocks.push({ line, valid: false, types: [], hasContext: false });
     }
   });
 
-  return { valid, invalid, types: [...types] };
+  const validBlocks = blocks.filter((block) => block.valid);
+  const invalid = blocks.length - validBlocks.length;
+
+  return {
+    valid: validBlocks.length,
+    invalid,
+    types: [...types],
+    blocks,
+    firstValidLine: validBlocks[0]?.line ?? null,
+    firstBlockLine: blocks[0]?.line ?? null,
+  };
+}
+
+function extractMetaRobots($: cheerio.CheerioAPI): { value: string; line: number | null } {
+  const nodes = $('meta[name="robots"], meta[name="googlebot"]');
+  const value = nodes
+    .toArray()
+    .map((element) => $(element).attr("content") ?? "")
+    .filter((entry) => entry.trim())
+    .join(", ")
+    .toLowerCase();
+
+  return { value, line: sourceLine(nodes.first()[0]) };
 }
 
 function extractLinks($: cheerio.CheerioAPI, base: URL): string[] {
@@ -581,41 +680,56 @@ function buildFiles(
 // ---------------------------------------------------------------------------
 
 function buildDiscoveryPillar(input: {
+  origin: string;
   llms: FetchTextOutcome;
   llmsFull: FetchTextOutcome;
   sitemap: SitemapOutcome;
+  robots: RobotsData;
+  robotsBody: string;
 }): AuditPillar {
-  const { llms, llmsFull, sitemap } = input;
+  const { origin, llms, llmsFull, sitemap, robots, robotsBody } = input;
   const checks: AuditCheck[] = [];
 
   const llmsIsText = llms.ok && !looksLikeHtml(llms.body);
-  const llmsLooksValid = llmsIsText && /^\s*#\s+\S/m.test(llms.body.slice(0, 1_000));
-  const llmsLinkCount = (llms.body.match(/\]\(/g) ?? []).length;
-  const llmsIsManifest = llmsLooksValid && llmsLinkCount > 0;
+  const llmsValidation: LlmsTxtValidation | null = llmsIsText ? validateLlmsTxt(llms.body) : null;
+  const llmsValid = llmsValidation?.valid ?? false;
 
   let llmsStatus: CheckStatus = "fail";
-  if (llmsIsManifest) llmsStatus = "pass";
-  else if (llms.status !== 404 && llms.status !== 0) llmsStatus = "warn";
+  if (llmsValid) llmsStatus = "pass";
+  else if (llmsIsText) llmsStatus = "warn";
+  else if (llms.ok) llmsStatus = "warn";
 
-  const llmsSummary = llmsIsManifest
-    ? `Found · ${formatBytes(llms.bytes)}`
-    : llms.ok
-      ? `Not usable · ${formatBytes(llms.bytes)}`
-      : llms.status === 404
-        ? "Missing"
-        : llms.status === 0
-          ? "Unreachable"
-          : `HTTP ${llms.status}`;
+  const llmsSummary = llmsValid
+    ? `Valid · ${plural(llmsValidation?.linkCount ?? 0, "link")}`
+    : llmsIsText
+      ? `Invalid · ${plural(llmsValidation?.issues.filter((issue) => issue.severity === "error").length ?? 0, "error")}`
+      : llms.ok
+        ? `Not text · ${formatBytes(llms.bytes)}`
+        : llms.status === 404
+          ? "Missing"
+          : llms.status === 0
+            ? "Unreachable"
+            : `HTTP ${llms.status}`;
 
-  const llmsDetail = llmsIsManifest
-    ? `A top-level heading and ${formatNumber(llmsLinkCount)} markdown link${llmsLinkCount === 1 ? "" : "s"} were found.`
+  const llmsDetail = llmsValid
+    ? `H1 “${llmsValidation?.h1}” with ${plural(llmsValidation?.linkCount ?? 0, "markdown link")} across ${plural(llmsValidation?.sections.length ?? 0, "section")}.`
     : !llms.ok
       ? llms.status === 404
-        ? "No /llms.txt file was found at the site root."
+        ? "No /llms.txt file was found at the site root, so agents have no curated entry point."
         : `The manifest could not be verified (HTTP ${llms.status || "no response"}).`
       : !llmsIsText
-        ? "The URL responds with an HTML page instead of a text manifest, which usually means the host serves a catch-all page for unknown paths."
-        : "The file exists but is missing the required H1 heading or markdown links.";
+        ? "The URL returns HTML instead of a plain-text manifest, which usually means the host serves a catch-all page for unknown paths."
+        : `The file exists but fails the structural checks: ${
+            llmsValidation?.issues
+              .filter((issue) => issue.severity === "error")
+              .map((issue) => issue.message)
+              .join(" ") || "missing H1 or markdown links."
+          }`;
+
+  const llmsErrorLine =
+    llmsValidation?.h1Line ??
+    llmsValidation?.issues.find((issue) => issue.line !== null)?.line ??
+    (llms.ok ? 1 : null);
 
   checks.push(
     check({
@@ -624,69 +738,140 @@ function buildDiscoveryPillar(input: {
       status: llmsStatus,
       summary: llmsSummary,
       detail: llmsDetail,
+      protocol: "llmstxt.org · H1 + markdown index",
+      evidence: evidenceAt("/llms.txt", llmsErrorLine, llms.body),
       recommendation:
         llmsStatus === "pass"
           ? undefined
-          : "Publish /llms.txt with a single H1, a blockquote summary, and links to the pages LLMs should read first. See llmstxt.org.",
+          : "Publish /llms.txt with one H1, a blockquote summary and H2 sections linking to the pages an LLM should read first.",
+      fix:
+        llmsStatus === "pass"
+          ? undefined
+          : fix(
+              "markdown",
+              `# Your site name
+
+> One sentence explaining what this site covers and who it is for.
+
+## Documentation
+- [Getting started](${origin}/docs/start)
+- [API reference](${origin}/docs/api)
+- [Authentication](${origin}/docs/auth)`,
+            ),
       weight: 3,
     }),
   );
 
   const llmsFullUsable = llmsFull.ok && !looksLikeHtml(llmsFull.body) && llmsFull.bytes > 50;
+  const llmsFullValidation = llmsFullUsable ? validateLlmsTxt(llmsFull.body) : null;
+  const llmsFullPaginated = llmsFullValidation?.paginated ?? false;
+  const llmsFullStatus: CheckStatus = llmsFullUsable && !llmsFullPaginated ? "pass" : "warn";
 
   checks.push(
     check({
       id: "llms-full-txt",
-      label: "llms-full.txt expansion",
-      status: llmsFullUsable ? "pass" : "warn",
+      label: "llms-full.txt bundle",
+      status: llmsFullStatus,
       summary: llmsFullUsable
-        ? `Found · ${formatBytes(llmsFull.bytes)}`
+        ? llmsFullPaginated
+          ? `Paginated · ${formatBytes(llmsFull.bytes)}`
+          : `Unpaginated · ${formatBytes(llmsFull.bytes)}`
         : llmsFull.status === 404
           ? "Not published"
           : "Not usable",
       detail: llmsFullUsable
-        ? "An expanded manifest is available for single-request ingestion."
+        ? llmsFullPaginated
+          ? "The bundle contains pagination markers. A single unpaginated file lets an agent ingest the whole corpus in one request."
+          : `One file with ${plural(llmsFullValidation?.lines ?? 0, "line")} of context, ready for single-request ingestion.`
         : llmsFull.status === 404
           ? "The optional expanded manifest is not published."
-          : "The optional expanded manifest could not be verified as a plain-text manifest.",
+          : "The optional expanded manifest could not be verified as a plain-text bundle.",
+      protocol: "llmstxt.org · llms-full.txt",
+      evidence: evidenceAt(
+        "/llms-full.txt",
+        llmsFullValidation?.h1Line ?? (llmsFull.ok ? 1 : null),
+        llmsFull.body,
+      ),
       recommendation:
-        "Optionally publish /llms-full.txt with the full text of your documentation so agents can ingest it in one request.",
+        llmsFullStatus === "pass"
+          ? undefined
+          : "Publish /llms-full.txt as one unpaginated markdown file containing the long-form content agents should ingest without crawling.",
+      fix:
+        llmsFullStatus === "pass"
+          ? undefined
+          : fix(
+              "markdown",
+              `# Your site name
+
+> The complete documentation bundle.
+
+## Getting started
+
+Full page content in markdown, with no \`?page=\` links and no truncated sections.
+`,
+            ),
       weight: 1,
     }),
   );
 
-  const sitemapStatus: CheckStatus =
-    sitemap.urls.length > 0
+  const sitemapHasUrls = sitemap.urls.length > 0;
+  const hasDirective = robots.sitemapLines.length > 0;
+  const directiveLine = robots.sitemapLines[0] ?? null;
+  const sitemapStatus: CheckStatus = sitemapHasUrls
+    ? hasDirective
       ? "pass"
-      : sitemap.found
-        ? "warn"
-        : sitemap.lastStatus === 404
-          ? "fail"
-          : "warn";
+      : "warn"
+    : sitemap.found
+      ? "warn"
+      : sitemap.lastStatus === 404
+        ? "fail"
+        : "warn";
 
   checks.push(
     check({
       id: "sitemap",
-      label: "XML sitemap",
+      label: "sitemap + robots directive",
       status: sitemapStatus,
-      summary:
-        sitemap.urls.length > 0
-          ? `${formatNumber(sitemap.urls.length)} URLs`
-          : sitemap.found
-            ? "Empty"
-            : sitemap.lastStatus === 404
-              ? "Missing"
-              : "Unverified",
-      detail:
-        sitemap.urls.length > 0
-          ? `Discovered ${formatNumber(sitemap.urls.length)} indexable URLs from ${sitemap.primaryUrl}.`
-          : sitemap.found
-            ? "A sitemap was found but did not contain any usable URLs."
-            : "No usable XML sitemap was found at /sitemap.xml or the locations referenced in robots.txt.",
+      summary: sitemapHasUrls
+        ? `${formatNumber(sitemap.urls.length)} URLs${hasDirective ? " · directive" : " · no directive"}`
+        : sitemap.found
+          ? "Empty"
+          : sitemap.lastStatus === 404
+            ? "Missing"
+            : "Unverified",
+      detail: sitemapHasUrls
+        ? `Discovered ${formatNumber(sitemap.urls.length)} indexable URLs from ${sitemap.primaryUrl}.${
+            hasDirective
+              ? ` robots.txt references a sitemap on line ${directiveLine}.`
+              : " robots.txt does not reference the sitemap with a Sitemap: directive."
+          }`
+        : sitemap.found
+          ? "A sitemap was found but did not contain any usable URLs."
+          : "No usable XML sitemap was found at /sitemap.xml or the locations referenced in robots.txt.",
+      protocol: "sitemaps.org · RFC 9309 Sitemap directive",
+      evidence: hasDirective
+        ? evidenceAt("/robots.txt", directiveLine, robotsBody)
+        : sitemapHasUrls
+          ? evidenceAt("/sitemap.xml", sitemap.firstUrlLine)
+          : evidenceAt("/sitemap.xml", null),
       recommendation:
         sitemapStatus === "pass"
           ? undefined
           : "Publish an XML sitemap at /sitemap.xml, keep it fresh, and reference it from robots.txt with a Sitemap: directive.",
+      fix:
+        sitemapStatus === "pass"
+          ? undefined
+          : fix(
+              "robots",
+              `# robots.txt
+Sitemap: ${origin}/sitemap.xml
+
+# /sitemap.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>${origin}/docs/start</loc></url>
+</urlset>`,
+            ),
       weight: 2,
     }),
   );
@@ -695,18 +880,20 @@ function buildDiscoveryPillar(input: {
     id: "discovery",
     name: "Discovery & Manifests",
     shortName: "Discovery",
-    description: "Can agents find a clean, curated index of your best content?",
+    description: "Can an agent find a curated, standards-compliant index of the content?",
     score: 0,
     checks,
   };
 }
 
 function buildAccessPillar(input: {
+  origin: string;
   robots: RobotsData;
   robotsResponse: FetchTextOutcome;
-  metaRobots: string;
+  metaRobots: { value: string; line: number | null };
+  xRobotsTag: string | null;
 }): AuditPillar {
-  const { robots, robotsResponse, metaRobots } = input;
+  const { origin, robots, robotsResponse, metaRobots, xRobotsTag } = input;
   const checks: AuditCheck[] = [];
 
   let robotsStatus: CheckStatus = "pass";
@@ -724,42 +911,89 @@ function buildAccessPillar(input: {
           ? "Missing"
           : "Unreachable",
       detail: robotsResponse.ok
-        ? `Parsed ${robots.groups.length} user-agent group${robots.groups.length === 1 ? "" : "s"} and ${robots.sitemaps.length} sitemap directive${robots.sitemaps.length === 1 ? "" : "s"}.`
+        ? `Parsed ${plural(robots.groups.length, "user-agent group")} and ${plural(robots.sitemaps.length, "sitemap directive")}.`
         : robotsResponse.status === 404
           ? "No robots.txt exists, so crawler access is implicit rather than explicit."
           : "robots.txt could not be read, so crawler access cannot be verified.",
+      protocol: "RFC 9309 §2.2",
+      evidence: evidenceAt("/robots.txt", robotsResponse.ok ? 1 : null),
       recommendation:
         robotsStatus === "pass"
           ? undefined
-          : "Publish a robots.txt that states your crawler policy explicitly, including any AI user-agent groups.",
+          : "Publish a robots.txt that states your crawler policy explicitly, including the AI user agents you want to allow or block.",
+      fix:
+        robotsStatus === "pass"
+          ? undefined
+          : fix(
+              "robots",
+              `User-agent: *
+Allow: /
+
+User-agent: GPTBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+Sitemap: ${origin}/sitemap.xml`,
+            ),
       weight: 1,
     }),
   );
 
-  let metaStatus: CheckStatus = "pass";
-  if (/\b(noindex|none)\b/i.test(metaRobots)) metaStatus = "fail";
-  else if (/nofollow/i.test(metaRobots)) metaStatus = "warn";
+  const explicitPolicy = hasExplicitAiPolicy(robots);
+  const aiPolicyStatus: CheckStatus = !robots.exists ? "warn" : explicitPolicy ? "pass" : "warn";
+  const aiGroupLine =
+    robots.groups.find((group) =>
+      group.agents.some((agent) =>
+        AI_CRAWLERS.some((crawler) => crawler.label.toLowerCase() === agent),
+      ),
+    )?.line ?? null;
 
   checks.push(
     check({
-      id: "meta-robots",
-      label: "Indexability signals",
-      status: metaStatus,
-      summary: metaRobots ? `meta robots: ${metaRobots}` : "No blocking directives",
-      detail:
-        metaStatus === "pass"
-          ? "No noindex or nofollow directives were found in the page head."
-          : `The page declares: ${metaRobots}.`,
+      id: "ai-policy",
+      label: "Explicit AI user-agent policy",
+      status: aiPolicyStatus,
+      summary: explicitPolicy
+        ? "Explicit groups found"
+        : robots.exists
+          ? "No AI groups"
+          : "No robots.txt",
+      detail: explicitPolicy
+        ? "robots.txt names at least one AI crawler explicitly, so the policy is auditable."
+        : robots.exists
+          ? "robots.txt only uses wildcard groups. Add named AI crawler groups so allow/block intent is explicit."
+          : "There is no robots.txt to hold an explicit AI crawler policy.",
+      protocol: "RFC 9309 §2.2.1",
+      evidence: evidenceAt("/robots.txt", aiGroupLine ?? (robots.exists ? 1 : null)),
       recommendation:
-        metaStatus === "pass"
+        aiPolicyStatus === "pass"
           ? undefined
-          : "Remove noindex/none from the robots meta tag on pages that should be discoverable.",
+          : "Add named Google-Extended, ClaudeBot and GPTBot groups with the access you intend to grant.",
+      fix:
+        aiPolicyStatus === "pass"
+          ? undefined
+          : fix(
+              "robots",
+              `User-agent: Google-Extended
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: GPTBot
+Allow: /`,
+            ),
       weight: 1,
     }),
   );
 
   for (const crawler of AI_CRAWLERS) {
-    const access = crawlerAccess(robots, crawler.label);
+    const access = crawlerAccess(robots, crawler.label, "/");
     checks.push(
       check({
         id: `bot-${crawler.id}`,
@@ -767,34 +1001,97 @@ function buildAccessPillar(input: {
         status: access.status,
         summary: access.summary,
         detail: `${crawler.vendor}: ${access.detail}`,
+        protocol: "RFC 9309 §2.2.1",
+        evidence: evidenceAt("/robots.txt", access.line),
         recommendation:
           access.status === "fail"
             ? `Update the ${crawler.label} group in robots.txt so the paths you want cited are crawlable.`
+            : access.scope === "wildcard" || access.scope === "missing"
+              ? `Add an explicit ${crawler.label} group so the allow decision is auditable rather than inherited from a wildcard.`
+              : undefined,
+        fix:
+          access.status === "fail" || access.scope === "wildcard" || access.scope === "missing"
+            ? fix(
+                "robots",
+                `User-agent: ${crawler.label}
+Allow: /`,
+              )
             : undefined,
         weight: 2,
       }),
     );
   }
 
+  const metaVerdict = evaluateMetaRobots(metaRobots.value);
+  checks.push(
+    check({
+      id: "meta-robots",
+      label: "robots meta directives",
+      status: metaVerdict.status,
+      summary: metaVerdict.summary,
+      detail: metaVerdict.detail,
+      protocol: "HTML robots meta directives",
+      evidence: evidenceAt("/", metaRobots.line ?? null),
+      recommendation:
+        metaVerdict.status === "pass"
+          ? undefined
+          : "Remove noindex/none from the robots meta tag on pages that should be discoverable.",
+      fix:
+        metaVerdict.status === "pass"
+          ? undefined
+          : fix("html", `<meta name="robots" content="index, follow" />`),
+      weight: 1,
+    }),
+  );
+
+  const headerVerdict = evaluateXRobotsTag(xRobotsTag);
+  checks.push(
+    check({
+      id: "x-robots-tag",
+      label: "X-Robots-Tag header",
+      status: headerVerdict.status,
+      summary: headerVerdict.summary,
+      detail: headerVerdict.detail,
+      protocol: "X-Robots-Tag · RFC 9309",
+      evidence: {
+        file: "HTTP response headers",
+        line: null,
+        snippet: xRobotsTag ? `X-Robots-Tag: ${xRobotsTag}` : null,
+      },
+      recommendation:
+        headerVerdict.status === "pass"
+          ? undefined
+          : "Remove blocking X-Robots-Tag directives for public pages, or scope them to the paths that should stay private.",
+      fix:
+        headerVerdict.status === "pass"
+          ? undefined
+          : fix(
+              "http",
+              `# Allow indexing and AI grounding for public content
+X-Robots-Tag: index, follow
+
+# Keep private paths out
+# X-Robots-Tag: noindex  (scoped to /internal/*)`,
+            ),
+      weight: 2,
+    }),
+  );
+
   return {
     id: "access",
     name: "Crawler Access Rules",
     shortName: "Access",
-    description: "Are the user agents that power AI answers allowed in?",
+    description: "Are the user agents that power AI answers explicitly allowed in?",
     score: 0,
     checks,
   };
 }
 
-const TEXT_RATIO_PASS = 0.08;
-const TEXT_RATIO_WARN = 0.04;
-const NOISE_RATIO_PASS = 0.55;
-const NOISE_RATIO_WARN = 0.75;
-
-function buildSemanticPillar(content: ContentModel): AuditPillar {
+function buildParseabilityPillar(content: ContentModel): AuditPillar {
   const checks: AuditCheck[] = [];
   const { headings } = content;
   const h1Count = headings.filter((heading) => heading.level === 1).length;
+  const firstH1 = headings.find((heading) => heading.level === 1) ?? headings[0] ?? null;
 
   checks.push(
     check({
@@ -804,29 +1101,39 @@ function buildSemanticPillar(content: ContentModel): AuditPillar {
       summary: h1Count === 0 ? "Missing" : `${h1Count} × H1`,
       detail:
         h1Count === 1
-          ? "The page has exactly one top-level heading."
+          ? "The content region has exactly one top-level heading."
           : h1Count === 0
-            ? "No H1 heading was found."
+            ? "No H1 heading was found in the content region."
             : "Multiple H1 headings make the page topic ambiguous.",
+      protocol: "HTML heading outline",
+      evidence: evidenceAt("/", firstH1?.line ?? null),
       recommendation:
         h1Count === 1
           ? undefined
           : "Give the page exactly one descriptive H1 that names the topic.",
-      weight: 2,
+      fix: h1Count === 1 ? undefined : fix("html", `<h1>Page topic in one clear sentence</h1>`),
+      weight: 1.5,
     }),
   );
 
-  const sequence = headings.map((heading) => `H${heading.level}`);
   let jumps = 0;
+  let firstJumpLine: number | null = null;
   for (let index = 1; index < headings.length; index += 1) {
-    if (headings[index].level - headings[index - 1].level > 1) jumps += 1;
+    if (headings[index].level - headings[index - 1].level > 1) {
+      jumps += 1;
+      if (firstJumpLine === null) firstJumpLine = headings[index].line;
+    }
   }
   const startsDeep = headings.length > 0 && headings[0].level > 1;
+  const outline = headings
+    .slice(0, 14)
+    .map((heading) => `H${heading.level}`)
+    .join(" → ");
 
   checks.push(
     check({
       id: "heading-order",
-      label: "Heading hierarchy",
+      label: "Heading sequence",
       status: headings.length === 0 ? "fail" : jumps > 0 || startsDeep ? "warn" : "pass",
       summary:
         headings.length === 0
@@ -835,39 +1142,64 @@ function buildSemanticPillar(content: ContentModel): AuditPillar {
             ? `${jumps} level jump${jumps === 1 ? "" : "s"}`
             : startsDeep
               ? `Starts at H${headings[0].level}`
-              : "Sequential",
+              : "H1 → H2 → H3",
       detail:
         headings.length === 0
           ? "The page contains no heading elements for a parser to build an outline from."
-          : `Outline: ${sequence.slice(0, 14).join(" → ")}${sequence.length > 14 ? " → …" : ""}`,
+          : `Outline: ${outline}${headings.length > 14 ? " → …" : ""}. ${
+              startsDeep ? "The outline starts deeper than H1. " : ""
+            }${jumps > 0 ? `${jumps} jump${jumps === 1 ? "" : "s"} skip a level.` : "No levels are skipped."}`,
+      protocol: "Semantic HTML heading hierarchy",
+      evidence: evidenceAt("/", firstJumpLine ?? headings[0]?.line ?? null),
       recommendation:
         headings.length > 0 && jumps === 0 && !startsDeep
           ? undefined
           : "Keep heading levels sequential (H1 → H2 → H3) so the document outline is unambiguous.",
-      weight: 1.5,
+      fix:
+        headings.length > 0 && jumps === 0 && !startsDeep
+          ? undefined
+          : fix(
+              "html",
+              `<h1>Page topic</h1>
+  <h2>First section</h2>
+    <h3>Supporting detail</h3>
+  <h2>Second section</h2>`,
+            ),
+      weight: 2,
     }),
   );
 
-  const ratioPct = content.textRatio * 100;
-  const ratioStatus: CheckStatus =
-    content.textRatio >= TEXT_RATIO_PASS
-      ? "pass"
-      : content.textRatio >= TEXT_RATIO_WARN
-        ? "warn"
-        : "fail";
+  const snrPct = content.snr * 100;
+  const snrStatus: CheckStatus =
+    content.snr >= SNR_PASS ? "pass" : content.snr >= SNR_WARN ? "warn" : "fail";
 
   checks.push(
     check({
-      id: "text-ratio",
-      label: "Text-to-DOM ratio",
-      status: ratioStatus,
-      summary: `${ratioPct.toFixed(1)}% readable text`,
-      detail: `${formatNumber(content.textChars)} characters of readable text against ${formatBytes(content.scopeBytes)} of content markup inside the ${content.scopeSelector} element (navigation, chrome and scripts excluded).`,
+      id: "snr",
+      label: "Static HTML signal-to-noise",
+      status: snrStatus,
+      summary: `${snrPct.toFixed(1)}% signal`,
+      detail: `${formatNumber(content.snrSignalChars)} characters of content text against ${formatNumber(content.snrNoiseChars)} characters of navigation, footer, banner and widget text. V2 requires at least ${Math.round(SNR_PASS * 100)}% signal.`,
+      protocol: "Static HTML SNR ≥ 65%",
+      evidence: evidenceAt("/", content.scopeLine),
       recommendation:
-        ratioStatus === "pass"
+        snrStatus === "pass"
           ? undefined
-          : "Wrap content in semantic elements and trim layout scaffolding so readable text makes up more of the markup a parser has to read.",
-      weight: 2,
+          : "Reduce repeated navigation and widget copy around the content region, and move primary prose into semantic main/article markup.",
+      fix:
+        snrStatus === "pass"
+          ? undefined
+          : fix(
+              "html",
+              `<main>
+  <article>
+    <h1>Primary topic</h1>
+    <p>Substantive, server-rendered prose that an agent can quote.</p>
+  </article>
+  <nav aria-label="On this page">…short table of contents…</nav>
+</main>`,
+            ),
+      weight: 2.5,
     }),
   );
 
@@ -877,49 +1209,39 @@ function buildSemanticPillar(content: ContentModel): AuditPillar {
   checks.push(
     check({
       id: "ssr-content",
-      label: "Server-rendered content",
+      label: "SSR payload readability",
       status: ssrStatus,
       summary: `${formatNumber(content.textChars)} chars in HTML`,
       detail:
         ssrStatus === "pass"
           ? "Substantial content is present in the initial HTML response, so crawlers do not need to execute JavaScript."
-          : "The initial HTML response contains little readable content, which suggests client-side rendering.",
+          : "The initial HTML response contains little readable content, which suggests client-side rendering or a JavaScript gate.",
+      protocol: "No-JS initial response",
+      evidence: evidenceAt("/", content.scopeLine),
       recommendation:
         ssrStatus === "pass"
           ? undefined
-          : "Render primary content on the server so it exists in the first HTML response.",
+          : "Render primary content on the server (SSR/SSG) so it exists in the first HTML response.",
+      fix:
+        ssrStatus === "pass"
+          ? undefined
+          : fix(
+              "html",
+              `<!-- Server-render the primary content, not a client-only shell -->
+<main>
+  <h1>Page topic</h1>
+  <p>At least 600 characters of readable content in the initial response.</p>
+</main>`,
+            ),
       weight: 2,
     }),
   );
 
-  const noisePct = content.noiseRatio * 100;
-  const noiseStatus: CheckStatus =
-    content.noiseRatio <= NOISE_RATIO_PASS
-      ? "pass"
-      : content.noiseRatio <= NOISE_RATIO_WARN
-        ? "warn"
-        : "fail";
-
-  checks.push(
-    check({
-      id: "noise-budget",
-      label: "Non-content budget",
-      status: noiseStatus,
-      summary: `${noisePct.toFixed(0)}% scripts & styles`,
-      detail: `${formatBytes(content.noiseBytes)} of script, style, SVG and frame markup in a ${formatBytes(content.htmlBytes)} document.`,
-      recommendation:
-        noiseStatus === "pass"
-          ? undefined
-          : "Defer or externalize scripts and styles, and remove third-party widgets from content pages.",
-      weight: 1.5,
-    }),
-  );
-
   return {
-    id: "semantic",
-    name: "Semantic Signal-to-Noise",
-    shortName: "Signal",
-    description: "How much of the document is meaningful content rather than chrome?",
+    id: "parseability",
+    name: "Static Parseability",
+    shortName: "Parse",
+    description: "Does the first HTML response read like a document, not a script bundle?",
     score: 0,
     checks,
   };
@@ -935,30 +1257,99 @@ function buildStructuredPillar(input: {
 
   const jsonLdStatus: CheckStatus =
     jsonLd.valid > 0 ? "pass" : jsonLd.invalid > 0 ? "warn" : "fail";
-  const types = jsonLd.types.slice(0, 4);
+  const types = jsonLd.types.slice(0, 6);
 
   checks.push(
     check({
       id: "json-ld",
-      label: "JSON-LD schema",
+      label: "JSON-LD presence & syntax",
       status: jsonLdStatus,
       summary:
         jsonLd.valid > 0
-          ? `${jsonLd.valid} valid block${jsonLd.valid === 1 ? "" : "s"}`
+          ? `${plural(jsonLd.valid, "valid block")}`
           : jsonLd.invalid > 0
-            ? "Invalid"
+            ? "Invalid JSON"
             : "Missing",
       detail:
         jsonLd.valid > 0
           ? `Valid structured data${types.length > 0 ? `: ${types.join(", ")}` : ""}.`
           : jsonLd.invalid > 0
-            ? `${jsonLd.invalid} JSON-LD block${jsonLd.invalid === 1 ? "" : "s"} could not be parsed.`
+            ? `${plural(jsonLd.invalid, "JSON-LD block")} could not be parsed.`
             : "No JSON-LD structured data was found in the page head.",
+      protocol: "schema.org JSON-LD",
+      evidence: evidenceAt("/", jsonLd.firstBlockLine),
       recommendation:
         jsonLdStatus === "pass"
           ? undefined
-          : "Add JSON-LD with @context and @type (Organization, WebSite, Article, Product, or FAQPage).",
+          : "Add a JSON-LD block with @context and @type so the page can be classified without guessing.",
+      fix:
+        jsonLdStatus === "pass"
+          ? undefined
+          : fix(
+              "json",
+              JSON.stringify(
+                {
+                  "@context": "https://schema.org",
+                  "@type": "TechArticle",
+                  headline: "Page topic",
+                  description: "One-sentence summary of the page.",
+                },
+                null,
+                2,
+              ),
+            ),
       weight: 2.5,
+    }),
+  );
+
+  const present = RECOMMENDED_SCHEMA_TYPES.filter((type) => jsonLd.types.includes(type));
+  const schemaStatus: CheckStatus =
+    present.length > 0 ? "pass" : jsonLd.valid > 0 ? "warn" : "fail";
+
+  checks.push(
+    check({
+      id: "schema-types",
+      label: "Recommended schema types",
+      status: schemaStatus,
+      summary: present.length > 0 ? present.join(", ") : "0 / 3 found",
+      detail: `Recommended types: ${RECOMMENDED_SCHEMA_TYPES.join(", ")}. Found: ${
+        jsonLd.types.length > 0 ? jsonLd.types.join(", ") : "none"
+      }.`,
+      protocol: "schema.org · TechArticle / FAQPage / SoftwareApplication",
+      evidence: evidenceAt("/", jsonLd.firstValidLine ?? jsonLd.firstBlockLine),
+      recommendation:
+        schemaStatus === "pass"
+          ? undefined
+          : "Add one page-appropriate type: TechArticle for documentation, FAQPage for Q&A, or SoftwareApplication for products.",
+      fix:
+        schemaStatus === "pass"
+          ? undefined
+          : fix(
+              "json",
+              JSON.stringify(
+                {
+                  "@context": "https://schema.org",
+                  "@type": "TechArticle",
+                  headline: "Page topic",
+                  description: "One-sentence summary.",
+                  author: { "@type": "Organization", name: "Your site" },
+                  about: { "@type": "SoftwareApplication", name: "Your product" },
+                  mainEntity: {
+                    "@type": "FAQPage",
+                    mainEntity: [
+                      {
+                        "@type": "Question",
+                        name: "What does this page cover?",
+                        acceptedAnswer: { "@type": "Answer", text: "A direct answer." },
+                      },
+                    ],
+                  },
+                },
+                null,
+                2,
+              ),
+            ),
+      weight: 1.5,
     }),
   );
 
@@ -969,9 +1360,25 @@ function buildStructuredPillar(input: {
       status: openApi.found ? "pass" : "warn",
       summary: openApi.found ? (openApi.path ?? "Found") : "Not found",
       detail: openApi.detail,
+      protocol: "OpenAPI 3 · /openapi.json",
+      evidence: evidenceAt(openApi.path ?? "/openapi.json", openApi.found ? 1 : null),
       recommendation: openApi.found
         ? undefined
         : "If the site exposes an API, publish an OpenAPI description at /openapi.json so agents can call it correctly.",
+      fix: openApi.found
+        ? undefined
+        : fix(
+            "json",
+            JSON.stringify(
+              {
+                openapi: "3.1.0",
+                info: { title: "Your API", version: "1.0.0" },
+                paths: {},
+              },
+              null,
+              2,
+            ),
+          ),
       weight: 1.5,
     }),
   );
@@ -981,22 +1388,31 @@ function buildStructuredPillar(input: {
       id: "well-known",
       label: ".well-known discovery",
       status: wellKnown.found ? "pass" : "warn",
-      summary: wellKnown.found
-        ? `${wellKnown.entries.length} document${wellKnown.entries.length === 1 ? "" : "s"}`
-        : "Nothing found",
+      summary: wellKnown.found ? plural(wellKnown.entries.length, "document") : "Nothing found",
       detail: wellKnown.detail,
+      protocol: "RFC 8615 · .well-known",
+      evidence: evidenceAt(wellKnown.path ?? "/.well-known/", wellKnown.found ? 1 : null),
       recommendation: wellKnown.found
         ? undefined
         : "Add /.well-known/security.txt (and ai-plugin.json if you expose tools) so agents can discover machine-readable policies.",
-      weight: 1,
+      fix: wellKnown.found
+        ? undefined
+        : fix(
+            "text",
+            `Contact: mailto:security@example.com
+Expires: 2030-01-01T00:00:00.000Z
+Preferred-Languages: en
+Canonical: https://example.com/.well-known/security.txt`,
+          ),
+      weight: 0.5,
     }),
   );
 
   return {
     id: "structured",
     name: "Structured Machine Interfaces",
-    shortName: "Structure",
-    description: "Can agents read your schemas and act on them without guessing?",
+    shortName: "Schema",
+    description: "Can agents classify the page and execute against a schema without guessing?",
     score: 0,
     checks,
   };
@@ -1101,7 +1517,7 @@ export async function analyzeSite(rawInput: string): Promise<AuditResult> {
 
   const sitemap = await loadSitemap(origin, robots, primarySitemap);
 
-  const $ = cheerio.load(homeResponse.body);
+  const $ = cheerio.load(homeResponse.body, { sourceCodeLocationInfo: true });
 
   const title =
     normalizeWhitespace($("head title").first().text()) ||
@@ -1119,14 +1535,7 @@ export async function analyzeSite(rawInput: string): Promise<AuditResult> {
     prettyDomain(finalUrl.toString());
 
   const language = $("html").attr("lang")?.trim() ?? null;
-
-  const metaRobots = [
-    $('meta[name="robots"]').attr("content"),
-    $('meta[name="googlebot"]').attr("content"),
-  ]
-    .filter((value): value is string => Boolean(value && value.trim()))
-    .join(", ")
-    .toLowerCase();
+  const metaRobots = extractMetaRobots($);
 
   const profile: SiteProfile = {
     url: requested.toString(),
@@ -1142,11 +1551,25 @@ export async function analyzeSite(rawInput: string): Promise<AuditResult> {
   const jsonLd = extractJsonLd($);
   const links = extractLinks($, finalUrl);
   const vision = buildVision({ html: homeResponse.body, title, content });
+  const xRobotsTag = homeResponse.headers["x-robots-tag"]?.trim() || null;
 
   const pillars: AuditPillar[] = [
-    buildDiscoveryPillar({ llms: llmsResponse, llmsFull: llmsFullResponse, sitemap }),
-    buildAccessPillar({ robots, robotsResponse: robotsResponse, metaRobots }),
-    buildSemanticPillar(content),
+    buildDiscoveryPillar({
+      origin,
+      llms: llmsResponse,
+      llmsFull: llmsFullResponse,
+      sitemap,
+      robots,
+      robotsBody: robotsResponse.body,
+    }),
+    buildAccessPillar({
+      origin,
+      robots,
+      robotsResponse,
+      metaRobots,
+      xRobotsTag,
+    }),
+    buildParseabilityPillar(content),
     buildStructuredPillar({ jsonLd, openApi, wellKnown }),
   ].map((pillar) => ({ ...pillar, score: scorePillar(pillar) }));
 
@@ -1165,6 +1588,8 @@ export async function analyzeSite(rawInput: string): Promise<AuditResult> {
           status: entry.status,
           summary: entry.summary,
           recommendation: entry.recommendation ?? "Review this check and adjust the site.",
+          evidence: entry.evidence,
+          fix: entry.fix,
           weight: entry.weight,
         })),
     )
@@ -1173,7 +1598,7 @@ export async function analyzeSite(rawInput: string): Promise<AuditResult> {
       if (rank(a.status) !== rank(b.status)) return rank(a.status) - rank(b.status);
       return b.weight - a.weight;
     })
-    .slice(0, 6);
+    .slice(0, 8);
 
   const pages = buildPages(sitemap.urls, links, finalUrl);
   const files = buildFiles(

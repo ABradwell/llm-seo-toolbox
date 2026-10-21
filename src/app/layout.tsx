@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Instrument_Serif, JetBrains_Mono, Space_Grotesk } from "next/font/google";
+import { JetBrains_Mono, Space_Grotesk } from "next/font/google";
 
 import "./globals.css";
 
@@ -15,31 +15,26 @@ const mono = JetBrains_Mono({
   display: "swap",
 });
 
-const serif = Instrument_Serif({
-  variable: "--font-instrument-serif",
-  subsets: ["latin"],
-  weight: "400",
-  style: ["normal", "italic"],
-  display: "swap",
-});
-
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: {
-    default: "LLMReady — Make your site legible to AI",
+    default: "LLMReady — Spec compliance for AI discovery",
     template: "%s · LLMReady",
   },
   description:
-    "Audit how AI crawlers see your site, fix what blocks them, and generate the manifests that make your content easier to quote, cite, and recommend. Open source and free.",
+    "Audit /llms.txt, RFC 9309 robots.txt, static HTML signal-to-noise and schema.org metadata. An open-source spec-compliance auditor for Gemini, Claude and AI search crawlers.",
   keywords: [
     "llms.txt",
-    "LLM SEO",
+    "llms-full.txt",
+    "RFC 9309",
     "AI crawlers",
+    "Google-Extended",
+    "ClaudeBot",
+    "GPTBot",
+    "LLM SEO",
     "GEO",
-    "generative engine optimization",
-    "robots.txt",
     "structured data",
   ],
   authors: [{ name: "LLMReady contributors" }],
@@ -48,15 +43,15 @@ export const metadata: Metadata = {
     type: "website",
     url: siteUrl,
     siteName: "LLMReady",
-    title: "LLMReady — Make your site legible to AI",
+    title: "LLMReady — Spec compliance for AI discovery",
     description:
-      "A free, open-source audit and authoring studio for LLM-ready websites. Score discovery, crawler access, semantic signal, and structured interfaces.",
+      "Validate the manifests, access rules and parseability signals AI crawlers depend on. Open source, no signup.",
   },
   twitter: {
     card: "summary_large_image",
-    title: "LLMReady — Make your site legible to AI",
+    title: "LLMReady — Spec compliance for AI discovery",
     description:
-      "Audit how AI crawlers see your site, fix what blocks them, and generate /llms.txt in minutes.",
+      "Audit /llms.txt, robots.txt access for AI agents, static HTML SNR and schema.org metadata.",
   },
   robots: {
     index: true,
@@ -67,7 +62,7 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#080a08",
+  themeColor: "#09090b",
   colorScheme: "dark",
 };
 
@@ -75,7 +70,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html
       lang="en"
-      className={`${sans.variable} ${mono.variable} ${serif.variable} h-full scroll-smooth`}
+      data-scroll-behavior="smooth"
+      className={`${sans.variable} ${mono.variable} h-full scroll-smooth`}
     >
       <body className="min-h-full bg-background font-sans text-foreground antialiased">
         {children}
