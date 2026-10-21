@@ -89,25 +89,25 @@ export const PIPELINE_PHASES: readonly PipelinePhase[] = [
       {
         id: "validate-url",
         label: "Validating URL",
-        ms: 350,
+        ms: 500,
         result: (audit) => `${protocolOf(audit.finalUrl)} · ${audit.domain}`,
       },
       {
         id: "fetch-home",
         label: "Fetching homepage HTML",
-        ms: 500,
+        ms: 700,
         result: (audit) => `${formatBytes(audit.vision.htmlBytes)} HTML`,
       },
       {
         id: "fetch-discovery",
         label: "Requesting robots.txt, llms.txt, llms-full.txt",
-        ms: 450,
+        ms: 650,
         result: discoveryResult,
       },
       {
         id: "read-sitemap",
         label: "Reading sitemap.xml",
-        ms: 400,
+        ms: 550,
         result: (audit) => {
           const sitemap = audit.files.find((file) => file.id === "sitemap");
           if (!sitemap?.found) return "not found";
@@ -125,25 +125,25 @@ export const PIPELINE_PHASES: readonly PipelinePhase[] = [
       {
         id: "inspect-json-ld",
         label: "Inspecting JSON-LD types",
-        ms: 300,
+        ms: 400,
         result: structuredTypes,
       },
       {
         id: "scan-routes",
         label: "Scanning routes and DOM",
-        ms: 350,
+        ms: 500,
         result: (audit) => signalsFrom(audit, ["url", "hostname", "markup", "manifest"]),
       },
       {
         id: "check-meta",
         label: "Checking meta and OpenGraph",
-        ms: 250,
+        ms: 350,
         result: (audit) => signalsFrom(audit, ["metadata"]),
       },
       {
         id: "assign-profile",
         label: "Assigning site profile",
-        ms: 400,
+        ms: 550,
         result: profileLabel,
       },
     ],
@@ -156,31 +156,31 @@ export const PIPELINE_PHASES: readonly PipelinePhase[] = [
       {
         id: "pillar-discovery",
         label: "Discovery and manifests",
-        ms: 400,
+        ms: 550,
         result: pillarResult("discovery"),
       },
       {
         id: "pillar-access",
         label: "Crawler access (RFC 9309)",
-        ms: 400,
+        ms: 550,
         result: pillarResult("access"),
       },
       {
         id: "pillar-parseability",
         label: "Static parseability and SNR",
-        ms: 450,
+        ms: 600,
         result: pillarResult("parseability"),
       },
       {
         id: "pillar-structured",
         label: "Structured machine interfaces",
-        ms: 400,
+        ms: 550,
         result: pillarResult("structured"),
       },
       {
         id: "score",
         label: "Scoring",
-        ms: 400,
+        ms: 550,
         result: (audit) => `${audit.score} · grade ${audit.grade}`,
       },
     ],

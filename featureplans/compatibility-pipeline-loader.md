@@ -13,7 +13,7 @@ Research on the labor illusion (Buell and Norton, 2011) found that people value 
 Guardrails that follow from this:
 
 - Every step shown maps to work `analyzeSite` actually performs
-- The sequence never pads a fast audit beyond about 2.5 seconds
+- The live sequence runs about seven seconds from mount so each step stays readable; cached results stay fast
 - Step results only appear once real data exists
 - No invented failures, retries or "optimizing" steps
 
@@ -55,18 +55,18 @@ Each phase also carries a one-line summary shown once it completes, such as `Saa
 
 The audit is a single request today, so the first version choreographs the sequence on the client.
 
-- Nominal pace is about 5.05 seconds: collecting 1.7s, classifying 1.3s, analyzing 2.05s
-- When the response arrives, the remaining steps play at 2.5x speed
+- Nominal pace is 7 seconds: collecting 2.4s, classifying 1.8s, analyzing 2.8s
+- Live audits play at 1x before and after the response, so a fast API still shows every step
 - If the response has not arrived by the last quarter of the scoring step, the sequence holds there with a "waiting for response" note and the elapsed time
-- Cached results (`audit.meta.cached`) play at 4x, about 1.3 seconds in total
+- Cached results (`audit.meta.cached`) play at 4x, about 1.75 seconds in total
 - Steps completed before the response show `done`. Their findings backfill from the response with a short highlight when it lands
 
 | Response arrives | Sequence length       |
 | ---------------- | --------------------- |
-| 0.9s             | about 2.5s            |
-| 2.8s             | about 3.7s            |
-| 7.0s             | about 7.4s, with hold |
-| cached           | about 1.3s            |
+| 0.9s             | about 7.0s            |
+| 2.8s             | about 7.0s            |
+| 7.0s             | about 7.1s, with hold |
+| cached           | about 1.75s           |
 
 ### Errors
 
@@ -133,4 +133,4 @@ Once the client version ships, stream progress from the server so each step tick
 
 - Should the loader stay visible for a moment after `done`, or hand off to the report immediately?
 - Should option D's ring replace `ScoreRing` entirely, so the loader and the report share one element?
-- Is the 2.5 second floor for fast audits right, or should very fast responses skip straight to the report?
+- Should the live sequence stay fixed at seven seconds, or scale with the audit's measured duration once the API streams real progress?

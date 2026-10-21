@@ -4,13 +4,12 @@ import { PIPELINE_PHASES, PIPELINE_STEPS, PIPELINE_TOTAL_MS } from "./pipeline-s
  * A pure, clock-free model of the loading sequence. The hook feeds it frame
  * deltas; tests feed it fixed ones.
  *
- * - Before the response, steps play at their nominal pace.
- * - After the response, the remainder plays at CATCH_UP_RATE (CACHED_RATE for cached audits).
+ * - Before and after the response, live audits play at their nominal pace.
+ * - Cached audits play at CACHED_RATE, so a cached result stays quick.
  * - If the response is late, the sequence holds inside the final step.
  * - An error freezes the sequence on the step that owns it.
  */
 
-export const CATCH_UP_RATE = 2.5;
 export const CACHED_RATE = 4;
 /** Frames longer than this (a background tab) advance by this much only. */
 export const MAX_FRAME_MS = 64;
@@ -75,7 +74,7 @@ export function advance(
   }
 
   const delta = Math.min(MAX_FRAME_MS, Math.max(0, deltaMs));
-  const rate = signal.responded ? (signal.cached ? CACHED_RATE : CATCH_UP_RATE) : 1;
+  const rate = signal.responded && signal.cached ? CACHED_RATE : 1;
   let position = Math.min(PIPELINE_TOTAL_MS, timeline.position + delta * rate);
   const holding = !signal.responded && position >= HOLD_AT_MS;
   if (holding) position = HOLD_AT_MS;
