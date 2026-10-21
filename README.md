@@ -60,15 +60,16 @@ Requirements: **Node 20.9+** (CI uses Node 22) and **pnpm 10+**.
 
 ### Scripts
 
-| Script           | Purpose                                         |
-| :--------------- | :---------------------------------------------- |
-| `pnpm dev`       | Start the development server on port 3000.      |
-| `pnpm build`     | Production build.                               |
-| `pnpm start`     | Serve the production build.                     |
-| `pnpm lint`      | ESLint over the whole project.                  |
-| `pnpm format`    | Prettier write (`format:check` to verify only). |
-| `pnpm typecheck` | `tsc --noEmit`.                                 |
-| `pnpm test`      | Vitest unit suite (`test:watch` to iterate).    |
+| Script             | Purpose                                         |
+| :----------------- | :---------------------------------------------- |
+| `pnpm dev`         | Start the development server on port 3000.      |
+| `pnpm build`       | Production build.                               |
+| `pnpm start`       | Serve the production build.                     |
+| `pnpm lint`        | ESLint over the whole project.                  |
+| `pnpm format`      | Prettier write (`format:check` to verify only). |
+| `pnpm screenshots` | Capture desktop/mobile app screenshots.         |
+| `pnpm typecheck`   | `tsc --noEmit`.                                 |
+| `pnpm test`        | Vitest unit suite (`test:watch` to iterate).    |
 
 ### Configuration
 
@@ -351,6 +352,12 @@ Because nothing is rendered in a browser, the audit reports what is **in the ini
 `pnpm test` runs the Vitest suite over the pure helpers — RFC 9309 parsing and agent decisions with source lines, sitemap parsing and index expansion, SSRF validation, scoring, `llms.txt` validation, directive evaluation, site classification, and the content model (scope selection, chrome removal, heading lines, SNR) — on fixtures, with no network access.
 
 Live audits are not part of the suite. To check the engine against real sites, run `pnpm start` and request `/api/audit?url=…`, or use the standard presets in the workspace.
+
+## Screenshot capture
+
+`pnpm screenshots --out "$TMPDIR/llm-ready-screenshots"` drives a locally installed Chrome through the DevTools Protocol. It captures the landing page and pipeline at 1440×900 and 390×844, then the workspace with automatic classification and a portfolio override. Start the app with `pnpm dev` first.
+
+Options: `--base-url`, `--out`, `--audit-url`, `--chrome` (or `CHROME_PATH`), `--scale` and `--config`. A custom config is a JSON array (or `{ "jobs": [...] }`) of jobs with `name`, `path`, `width`, `height`, `mobile`, `deviceScaleFactor`, `fullPage`, `scrollTo`, `waitForText`, `waitForSelector`, `settleMs` and `timeoutMs`.
 
 ## Deployment (Vercel)
 
