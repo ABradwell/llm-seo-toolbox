@@ -21,6 +21,9 @@
   --pass: #357a55;
   --warn: #a86a1f;
   --fail: #b23b48;
+  --pass-bright: #57a773;
+  --warn-bright: #c98a3d;
+  --fail-bright: #d44d5c;
   --pass-light: #8ecba3;
   --warn-light: #e8b267;
   --fail-light: #ef9aa4;
@@ -50,6 +53,9 @@
   --color-pass: var(--pass);
   --color-warn: var(--warn);
   --color-fail: var(--fail);
+  --color-pass-bright: var(--pass-bright);
+  --color-warn-bright: var(--warn-bright);
+  --color-fail-bright: var(--fail-bright);
   --color-pass-light: var(--pass-light);
   --color-warn-light: var(--warn-light);
   --color-fail-light: var(--fail-light);

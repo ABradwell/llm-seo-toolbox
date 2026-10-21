@@ -59,11 +59,11 @@ export function scoreTone(score: number): "pass" | "warn" | "fail" {
 export function toneColor(tone: "pass" | "warn" | "fail"): string {
   switch (tone) {
     case "pass":
-      return "var(--pass)";
+      return "var(--pass-bright)";
     case "warn":
-      return "var(--warn)";
+      return "var(--warn-bright)";
     default:
-      return "var(--fail)";
+      return "var(--fail-bright)";
   }
 }
 
