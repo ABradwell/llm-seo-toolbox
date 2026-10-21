@@ -257,7 +257,7 @@ function EmptyState() {
         <Badge variant="accent">free · open source · no signup</Badge>
         <h1 className="mt-4 text-3xl font-medium tracking-[-0.03em] sm:text-5xl">
           Audit any site against the
-          <span className="text-accent"> AI discovery specs.</span>
+          <span className="text-accent-strong"> AI discovery specs.</span>
         </h1>
         <p className="mt-4 max-w-lg text-sm leading-relaxed text-muted sm:text-base">
           Enter a domain to see whether crawlers can find your manifests, whether robots.txt lets
@@ -284,7 +284,9 @@ function EmptyState() {
             >
               <p className="flex items-center justify-between font-mono text-[9px] tracking-[0.1em] text-muted uppercase">
                 {target.category}
-                <span className="text-muted/50 transition-colors group-hover:text-accent">↗</span>
+                <span className="text-muted/50 transition-colors group-hover:text-accent-strong">
+                  ↗
+                </span>
               </p>
               <p className="mt-2 text-sm font-medium">{target.name}</p>
               <p className="mt-1 text-[11px] leading-relaxed text-muted">{target.blurb}</p>
@@ -326,7 +328,7 @@ function ErrorState({ error, onRetry }: { error: WorkspaceError; onRetry: () => 
             <a
               key={target.url}
               href={`/app?url=${encodeURIComponent(target.url)}`}
-              className="underline-offset-4 transition-colors hover:text-accent hover:underline"
+              className="underline-offset-4 transition-colors hover:text-accent-strong hover:underline"
             >
               {target.name}
             </a>
@@ -347,7 +349,7 @@ function WorkspaceFooter() {
             href={siteConfig.llmsTxtSpec}
             target="_blank"
             rel="noreferrer"
-            className="transition-colors hover:text-accent"
+            className="transition-colors hover:text-accent-strong"
           >
             llms.txt ↗
           </a>
@@ -355,7 +357,7 @@ function WorkspaceFooter() {
             href={siteConfig.rfc9309}
             target="_blank"
             rel="noreferrer"
-            className="transition-colors hover:text-accent"
+            className="transition-colors hover:text-accent-strong"
           >
             RFC 9309 ↗
           </a>
@@ -363,7 +365,7 @@ function WorkspaceFooter() {
             href={siteConfig.github}
             target="_blank"
             rel="noreferrer"
-            className="transition-colors hover:text-accent"
+            className="transition-colors hover:text-accent-strong"
           >
             GitHub ↗
           </a>
@@ -371,7 +373,7 @@ function WorkspaceFooter() {
             href={siteConfig.coffee}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-1 text-accent transition-opacity hover:opacity-80"
+            className="inline-flex items-center gap-1 text-accent-strong transition-opacity hover:opacity-80"
           >
             <Coffee className="size-3" aria-hidden="true" />
             Buy me a coffee

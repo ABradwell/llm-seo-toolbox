@@ -49,7 +49,7 @@ export function SiteFooter() {
                 href={siteConfig.github}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-1 transition-colors hover:text-accent"
+                className="inline-flex items-center gap-1 transition-colors hover:text-accent-strong"
               >
                 <Github className="size-3" aria-hidden="true" />
                 GitHub
@@ -58,7 +58,7 @@ export function SiteFooter() {
                 href={siteConfig.coffee}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-1 transition-colors hover:text-accent"
+                className="inline-flex items-center gap-1 transition-colors hover:text-accent-strong"
               >
                 <Coffee className="size-3" aria-hidden="true" />
                 BMC
@@ -67,7 +67,7 @@ export function SiteFooter() {
                 href={siteConfig.vercelDeploy}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-1 transition-colors hover:text-accent"
+                className="inline-flex items-center gap-1 transition-colors hover:text-accent-strong"
               >
                 <Triangle className="size-3" aria-hidden="true" />
                 Vercel
@@ -88,14 +88,14 @@ export function SiteFooter() {
                         href={item.href}
                         target="_blank"
                         rel="noreferrer"
-                        className="font-mono text-[11px] text-muted transition-colors hover:text-accent"
+                        className="font-mono text-[11px] text-muted transition-colors hover:text-accent-strong"
                       >
                         {item.label} ↗
                       </a>
                     ) : (
                       <Link
                         href={item.href}
-                        className="font-mono text-[11px] text-muted transition-colors hover:text-accent"
+                        className="font-mono text-[11px] text-muted transition-colors hover:text-accent-strong"
                       >
                         {item.label}
                       </Link>
