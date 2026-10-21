@@ -9,14 +9,14 @@ export function LogoMark({ className }: { className?: string }) {
       <path
         d="M9 11.5V9h2.5M20.5 9H23v2.5M23 20.5V23h-2.5M11.5 23H9v-2.5"
         fill="none"
-        stroke="#0a0d09"
+        stroke="var(--accent-contrast)"
         strokeWidth="1.8"
         strokeLinecap="square"
       />
       <path
         d="M12 13.2h8M12 16.2h6M12 19.2h4"
         fill="none"
-        stroke="#0a0d09"
+        stroke="var(--accent-contrast)"
         strokeWidth="1.8"
         strokeLinecap="square"
       />

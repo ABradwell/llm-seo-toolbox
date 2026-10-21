@@ -9,7 +9,7 @@ const badgeVariants = cva(
     variants: {
       variant: {
         default: "border-line bg-panel-2 text-muted",
-        accent: "border-accent/40 bg-accent/10 text-accent",
+        accent: "border-accent/40 bg-accent/10 text-accent-strong",
         pass: "border-pass/40 bg-pass/10 text-pass",
         warn: "border-warn/40 bg-warn/10 text-warn",
         fail: "border-fail/40 bg-fail/10 text-fail",

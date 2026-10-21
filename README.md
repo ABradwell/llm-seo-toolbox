@@ -33,7 +33,7 @@ No accounts, no database, no JavaScript execution against the target site.
 
 ### Landing page — `/`
 
-A terminal hero with a quick audit bar and four functional standard presets (`Next.js`, `Python Docs`, `Stripe API`, `Tailwind CSS`). Below it, a **live specification checklist** runs the real `/api/audit` engine against a selected preset and resolves the Discovery, Access and Structure rows in place — no mocked screenshots. The page closes with the crawler reference strip, GitHub, Vercel deploy and Buy Me a Coffee links.
+A terminal hero with a quick audit bar. Below it, a **live specification checklist** runs the real `/api/audit` engine against a selected preset (`Next.js`, `Python Docs`, `Stripe API`, `Tailwind CSS`) and resolves the Discovery, Access and Structure rows in place — no mocked screenshots. The page closes with the crawler reference strip, GitHub, Vercel deploy and Buy Me a Coffee links.
 
 ### Workspace — `/app`
 
