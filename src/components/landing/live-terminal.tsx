@@ -18,17 +18,19 @@ const LINES: TerminalLine[] = [
 
 export function LiveTerminal() {
   return (
-    <div className="relative overflow-hidden rounded-[4px] border border-line bg-panel/90">
+    <div className="relative overflow-hidden rounded-[4px] border border-parchment/15 bg-code shadow-[0_30px_70px_-40px_rgba(0,0,0,0.65)]">
       <div
-        className="pointer-events-none absolute inset-x-0 top-0 h-20 scan-line bg-gradient-to-b from-accent/[0.06] to-transparent"
+        className="pointer-events-none absolute inset-x-0 top-0 h-20 scan-line bg-gradient-to-b from-accent-light/[0.08] to-transparent"
         aria-hidden="true"
       />
-      <div className="flex items-center justify-between gap-3 border-b border-line bg-panel-2/70 px-3 py-2">
-        <div className="flex items-center gap-2 font-mono text-[10px] tracking-[0.14em] text-muted uppercase">
-          <span className="size-1.5 rounded-full bg-accent" aria-hidden="true" />
+      <div className="flex items-center justify-between gap-3 border-b border-code-foreground/10 bg-code-foreground/[0.04] px-3 py-2">
+        <div className="flex items-center gap-2 font-mono text-[10px] tracking-[0.14em] text-code-muted uppercase">
+          <span className="size-1.5 rounded-full bg-accent-light" aria-hidden="true" />
           reference run
         </div>
-        <span className="truncate font-mono text-[10px] text-muted/70">v2 · standard checks</span>
+        <span className="truncate font-mono text-[10px] text-code-muted/70">
+          v2 · standard checks
+        </span>
       </div>
 
       <div className="relative min-h-[268px] scanlines p-4 font-mono text-[11.5px] leading-6 sm:text-[12px]">
@@ -37,33 +39,33 @@ export function LiveTerminal() {
             key={line.text}
             className={cn(
               "break-words",
-              line.kind === "command" && "text-foreground",
-              line.kind === "pass" && "text-muted",
-              line.kind === "warn" && "text-warn",
-              line.kind === "info" && "text-accent",
+              line.kind === "command" && "text-code-foreground",
+              line.kind === "pass" && "text-code-muted",
+              line.kind === "warn" && "text-warn-light",
+              line.kind === "info" && "text-accent-light",
             )}
           >
             {line.kind === "pass" ? (
-              <span className="mr-2 text-pass">✓</span>
+              <span className="mr-2 text-pass-light">✓</span>
             ) : line.kind === "warn" ? (
-              <span className="mr-2 text-warn">!</span>
+              <span className="mr-2 text-warn-light">!</span>
             ) : line.kind === "command" ? (
-              <span className="mr-2 text-accent">›</span>
+              <span className="mr-2 text-accent-light">›</span>
             ) : (
-              <span className="mr-2 text-accent">→</span>
+              <span className="mr-2 text-accent-light">→</span>
             )}
             {line.text}
           </p>
         ))}
         <span
-          className="mt-2 inline-block h-4 w-2 caret bg-accent align-middle"
+          className="mt-2 inline-block h-4 w-2 caret bg-accent-light align-middle"
           aria-hidden="true"
         />
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line bg-panel-2/50 px-3 py-2 font-mono text-[10px] text-muted">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-code-foreground/10 bg-code-foreground/[0.03] px-3 py-2 font-mono text-[10px] text-code-muted">
         <span>llms.txt · RFC 9309 · schema.org</span>
-        <span className="text-pass">20 checks / 1 request</span>
+        <span className="text-pass-light">20 checks / 1 request</span>
       </div>
     </div>
   );

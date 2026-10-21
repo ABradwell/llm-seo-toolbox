@@ -1,20 +1,32 @@
 @import "tailwindcss";
 
 :root {
-  /* Dark zinc surfaces, one lime signal colour. */
-  --background: #09090b;
-  --foreground: #fafafa;
-  --panel: #111113;
-  --panel-2: #18181b;
-  --panel-3: #202024;
-  --muted: #a1a1aa;
-  --line: rgba(250, 250, 250, 0.12);
-  --line-strong: rgba(250, 250, 250, 0.2);
-  --accent: #c8f169;
-  --accent-strong: #d8ff83;
-  --pass: #a3e635;
-  --warn: #fbbf24;
-  --fail: #fb7185;
+  /* Parchment backdrop, ink text, Pacific Cyan signal. */
+  --background: #f2efea;
+  --foreground: #131b23;
+  --panel: #faf8f4;
+  --panel-2: #e8e2d8;
+  --panel-3: #ddd5c9;
+  --muted: #5f6a70;
+  --line: rgba(19, 27, 35, 0.14);
+  --line-strong: rgba(19, 27, 35, 0.3);
+  --accent: #348aa7;
+  --accent-hover: #4a9db8;
+  --accent-strong: #2a7088;
+  --accent-soft: #d9e8ee;
+  --accent-contrast: #131b23;
+  --accent-light: #8ccbdd;
+  --parchment: #f2efea;
+  --ink: #131b23;
+  --pass: #357a55;
+  --warn: #a86a1f;
+  --fail: #b23b48;
+  --pass-light: #8ecba3;
+  --warn-light: #e8b267;
+  --fail-light: #ef9aa4;
+  --code: #1b2731;
+  --code-foreground: #f2efea;
+  --code-muted: #a8b4ba;
   --radius: 4px;
 }
 
@@ -28,10 +40,22 @@
   --color-line: var(--line);
   --color-line-strong: var(--line-strong);
   --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
   --color-accent-strong: var(--accent-strong);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-contrast: var(--accent-contrast);
+  --color-accent-light: var(--accent-light);
+  --color-parchment: var(--parchment);
+  --color-ink: var(--ink);
   --color-pass: var(--pass);
   --color-warn: var(--warn);
   --color-fail: var(--fail);
+  --color-pass-light: var(--pass-light);
+  --color-warn-light: var(--warn-light);
+  --color-fail-light: var(--fail-light);
+  --color-code: var(--code);
+  --color-code-foreground: var(--code-foreground);
+  --color-code-muted: var(--code-muted);
   --font-sans: var(--font-space-grotesk);
   --font-mono: var(--font-jetbrains-mono);
 
@@ -52,6 +76,7 @@
 
 html {
   background: var(--background);
+  color-scheme: light;
 }
 
 body {
@@ -63,7 +88,7 @@ body {
 
 ::selection {
   background: var(--accent);
-  color: #0a0d09;
+  color: var(--accent-contrast);
 }
 
 ::-webkit-scrollbar {
@@ -72,21 +97,21 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: #0b0b0d;
+  background: var(--panel-2);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #2b2b31;
-  border: 2px solid #0b0b0d;
+  background: var(--muted);
+  border: 2px solid var(--panel-2);
   border-radius: 2px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #3f3f46;
+  background: var(--ink);
 }
 
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--accent-strong);
   outline-offset: 2px;
 }
 
@@ -146,16 +171,16 @@ summary::-webkit-details-marker {
 
 @utility terminal-grid {
   background-image:
-    linear-gradient(to right, rgba(250, 250, 250, 0.04) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(250, 250, 250, 0.04) 1px, transparent 1px);
+    linear-gradient(to right, rgba(242, 239, 234, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(242, 239, 234, 0.05) 1px, transparent 1px);
   background-size: 32px 32px;
 }
 
 @utility scanlines {
   background-image: repeating-linear-gradient(
     to bottom,
-    rgba(250, 250, 250, 0.025) 0,
-    rgba(250, 250, 250, 0.025) 1px,
+    rgba(242, 239, 234, 0.03) 0,
+    rgba(242, 239, 234, 0.03) 1px,
     transparent 1px,
     transparent 4px
   );

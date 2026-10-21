@@ -13,7 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { downloadText } from "@/lib/download";
 import { byteLength, buildLlmsFullTxt, buildLlmsTxt, groupPages } from "@/lib/llms";
 import { validateLlmsTxt } from "@/lib/llms-txt";
-import { formatBytes, formatNumber } from "@/lib/utils";
+import { cn, formatBytes, formatNumber } from "@/lib/utils";
 import type { AuditResult } from "@/types/audit";
 
 type FileKind = "llms" | "full";
@@ -135,12 +135,14 @@ export function LlmsTxtEditor({ audit }: { audit: AuditResult }) {
                     aria-pressed={active}
                     className={
                       active
-                        ? "rounded-[2px] border border-accent/50 bg-accent/10 px-2 py-1 font-mono text-[10px] text-foreground transition-colors"
+                        ? "rounded-[2px] border border-ink bg-ink px-2 py-1 font-mono text-[10px] text-parchment transition-colors"
                         : "rounded-[2px] border border-line bg-panel-2/60 px-2 py-1 font-mono text-[10px] text-muted transition-colors hover:text-foreground"
                     }
                   >
                     {section.name}
-                    <span className="ml-1.5 text-muted/60">{section.pages.length}</span>
+                    <span className={cn("ml-1.5", active ? "text-parchment/60" : "text-muted/60")}>
+                      {section.pages.length}
+                    </span>
                   </button>
                 );
               })}
@@ -173,7 +175,7 @@ export function LlmsTxtEditor({ audit }: { audit: AuditResult }) {
                 aria-pressed={fileKind === kind}
                 className={
                   fileKind === kind
-                    ? "rounded-[2px] bg-accent px-2.5 py-1 font-mono text-[10px] text-[#0a0d09]"
+                    ? "rounded-[2px] bg-ink px-2.5 py-1 font-mono text-[10px] text-parchment"
                     : "rounded-[2px] px-2.5 py-1 font-mono text-[10px] text-muted transition-colors hover:text-foreground"
                 }
               >

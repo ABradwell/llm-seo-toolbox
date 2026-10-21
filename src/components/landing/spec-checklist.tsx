@@ -143,7 +143,7 @@ export function SpecChecklist() {
       <div className="mx-auto w-full max-w-7xl px-4 py-14 sm:px-6 lg:py-20">
         <div className="flex flex-wrap items-end justify-between gap-6">
           <div className="max-w-2xl">
-            <p className="font-mono text-[10px] tracking-[0.2em] text-accent uppercase">
+            <p className="font-mono text-[10px] tracking-[0.2em] text-accent-strong uppercase">
               02 / live specification checklist
             </p>
             <h2 className="mt-3 text-2xl font-medium tracking-tight sm:text-4xl">
@@ -168,7 +168,7 @@ export function SpecChecklist() {
                   className={cn(
                     "inline-flex items-center gap-1.5 rounded-[3px] border px-2.5 py-1.5 font-mono text-[11px] transition-colors disabled:opacity-60",
                     active
-                      ? "border-accent/50 bg-accent/10 text-accent"
+                      ? "border-accent-strong bg-accent-strong text-parchment"
                       : "border-line bg-panel/70 text-muted hover:border-line-strong hover:text-foreground",
                   )}
                 >

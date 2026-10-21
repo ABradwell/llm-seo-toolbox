@@ -374,7 +374,7 @@ function CheckRow({
       </tr>
 
       {open ? (
-        <tr id={detailId} className="bg-[#0b0b0d]">
+        <tr id={detailId} className="bg-panel-2/40">
           <td colSpan={6} className="border-t border-line px-4 py-4">
             <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
               <div className="min-w-0">
