@@ -24,7 +24,7 @@ export function TerminalHero() {
               className="border-accent-light/40 bg-accent-light/10 text-accent-light"
             >
               <Radio className="size-3" aria-hidden="true" />
-              V2 · spec compliance
+              V3 · classify + audit
             </Badge>
             <span className="font-mono text-[10px] tracking-[0.12em] text-parchment/65 uppercase">
               open source · no signup
@@ -41,10 +41,10 @@ export function TerminalHero() {
           </div>
 
           <p className="mt-5 max-w-xl text-sm leading-relaxed text-parchment/75 sm:text-base">
-            <span className="font-medium text-parchment">LLMReady</span> audits{" "}
-            <span className="font-mono text-parchment">/llms.txt</span>, RFC 9309 access rules,
-            static HTML signal-to-noise and schema.org metadata — then shows the exact line and code
-            that fixes each miss.
+            <span className="font-medium text-parchment">LLMReady</span> classifies the site, then
+            audits <span className="font-mono text-parchment">/llms.txt</span>, RFC 9309 access
+            rules, static HTML signal-to-noise and the schema.org types that profile expects — with
+            the exact line and code that fixes each miss.
           </p>
 
           <dl className="mt-8 grid max-w-xl grid-cols-3 border-t border-parchment/15 pt-4">

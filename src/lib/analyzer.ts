@@ -14,10 +14,13 @@ import type {
   DiscoveryFile,
   FixLanguage,
   RemovedNoise,
+  SiteClassification,
   SiteProfile,
+  SiteType,
   VisionPayload,
 } from "@/types/audit";
 
+import { classifySite } from "./classifier";
 import { buildContentModel, SNR_PASS, SNR_WARN, type ContentModel } from "./content";
 import { evaluateMetaRobots, evaluateXRobotsTag } from "./directives";
 import { fetchText, type FetchTextOutcome } from "./fetch-page";
@@ -44,8 +47,10 @@ const STANDARD_TIMEOUT_MS = 6_000;
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const CACHE_MAX_ENTRIES = 30;
 
-/** schema.org types V2 treats as the machine-readable baseline. */
-const RECOMMENDED_SCHEMA_TYPES = ["TechArticle", "FAQPage", "SoftwareApplication"] as const;
+export interface AnalyzeOptions {
+  /** A user-pinned V3 profile; the automatic classification is still reported. */
+  siteType?: SiteType | null;
+}
 
 export class AuditError extends Error {
   readonly code: string;
@@ -1251,9 +1256,12 @@ function buildStructuredPillar(input: {
   jsonLd: JsonLdReport;
   openApi: ProbeResult;
   wellKnown: ProbeResult & { entries: string[] };
+  classification: SiteClassification;
 }): AuditPillar {
-  const { jsonLd, openApi, wellKnown } = input;
+  const { jsonLd, openApi, wellKnown, classification } = input;
   const checks: AuditCheck[] = [];
+  const recommendedSchema = classification.compatibility.recommendedSchema;
+  const profileLabel = classification.label;
 
   const jsonLdStatus: CheckStatus =
     jsonLd.valid > 0 ? "pass" : jsonLd.invalid > 0 ? "warn" : "fail";
@@ -1290,7 +1298,7 @@ function buildStructuredPillar(input: {
               JSON.stringify(
                 {
                   "@context": "https://schema.org",
-                  "@type": "TechArticle",
+                  "@type": recommendedSchema[0] ?? "TechArticle",
                   headline: "Page topic",
                   description: "One-sentence summary of the page.",
                 },
@@ -1302,25 +1310,29 @@ function buildStructuredPillar(input: {
     }),
   );
 
-  const present = RECOMMENDED_SCHEMA_TYPES.filter((type) => jsonLd.types.includes(type));
+  const present = recommendedSchema.filter((type) => jsonLd.types.includes(type));
   const schemaStatus: CheckStatus =
     present.length > 0 ? "pass" : jsonLd.valid > 0 ? "warn" : "fail";
+  const expected =
+    recommendedSchema.length > 2
+      ? `${recommendedSchema.slice(0, -1).join(", ")} or ${recommendedSchema[recommendedSchema.length - 1]}`
+      : recommendedSchema.join(" or ");
 
   checks.push(
     check({
       id: "schema-types",
-      label: "Recommended schema types",
+      label: "Profile schema types",
       status: schemaStatus,
-      summary: present.length > 0 ? present.join(", ") : "0 / 3 found",
-      detail: `Recommended types: ${RECOMMENDED_SCHEMA_TYPES.join(", ")}. Found: ${
+      summary: present.length > 0 ? present.join(", ") : `0 / ${recommendedSchema.length} found`,
+      detail: `The ${profileLabel} profile expects ${expected}. Found: ${
         jsonLd.types.length > 0 ? jsonLd.types.join(", ") : "none"
       }.`,
-      protocol: "schema.org · TechArticle / FAQPage / SoftwareApplication",
+      protocol: `schema.org · ${recommendedSchema.join(" / ")}`,
       evidence: evidenceAt("/", jsonLd.firstValidLine ?? jsonLd.firstBlockLine),
       recommendation:
         schemaStatus === "pass"
           ? undefined
-          : "Add one page-appropriate type: TechArticle for documentation, FAQPage for Q&A, or SoftwareApplication for products.",
+          : `Add a ${recommendedSchema[0]} object (or an equivalent ${profileLabel.toLowerCase()} type) to the page's JSON-LD.`,
       fix:
         schemaStatus === "pass"
           ? undefined
@@ -1329,21 +1341,29 @@ function buildStructuredPillar(input: {
               JSON.stringify(
                 {
                   "@context": "https://schema.org",
-                  "@type": "TechArticle",
-                  headline: "Page topic",
-                  description: "One-sentence summary.",
-                  author: { "@type": "Organization", name: "Your site" },
-                  about: { "@type": "SoftwareApplication", name: "Your product" },
-                  mainEntity: {
-                    "@type": "FAQPage",
-                    mainEntity: [
-                      {
-                        "@type": "Question",
-                        name: "What does this page cover?",
-                        acceptedAnswer: { "@type": "Answer", text: "A direct answer." },
-                      },
-                    ],
-                  },
+                  "@type": recommendedSchema[0] ?? "TechArticle",
+                  name: "Your site or page",
+                  description: "One-sentence summary matched to this profile.",
+                  ...(classification.type === "local-business"
+                    ? {
+                        address: {
+                          "@type": "PostalAddress",
+                          streetAddress: "1 Main Street",
+                          addressLocality: "Your city",
+                          addressCountry: "US",
+                        },
+                      }
+                    : {}),
+                  ...(classification.type === "ecommerce"
+                    ? {
+                        offers: {
+                          "@type": "Offer",
+                          price: "0.00",
+                          priceCurrency: "USD",
+                          availability: "https://schema.org/InStock",
+                        },
+                      }
+                    : {}),
                 },
                 null,
                 2,
@@ -1353,32 +1373,43 @@ function buildStructuredPillar(input: {
     }),
   );
 
+  const openApiScored = classification.compatibility.openApiScored;
+  const openApiStatus: CheckStatus = !openApiScored ? "info" : openApi.found ? "pass" : "warn";
+
   checks.push(
     check({
       id: "openapi",
       label: "OpenAPI description",
-      status: openApi.found ? "pass" : "warn",
-      summary: openApi.found ? (openApi.path ?? "Found") : "Not found",
-      detail: openApi.detail,
+      status: openApiStatus,
+      summary: !openApiScored
+        ? "Not scored"
+        : openApi.found
+          ? (openApi.path ?? "Found")
+          : "Not found",
+      detail: !openApiScored
+        ? `OpenAPI is not part of the ${profileLabel} compatibility profile. It is scored for SaaS and documentation sites only.`
+        : openApi.detail,
       protocol: "OpenAPI 3 · /openapi.json",
       evidence: evidenceAt(openApi.path ?? "/openapi.json", openApi.found ? 1 : null),
-      recommendation: openApi.found
-        ? undefined
-        : "If the site exposes an API, publish an OpenAPI description at /openapi.json so agents can call it correctly.",
-      fix: openApi.found
-        ? undefined
-        : fix(
-            "json",
-            JSON.stringify(
-              {
-                openapi: "3.1.0",
-                info: { title: "Your API", version: "1.0.0" },
-                paths: {},
-              },
-              null,
-              2,
+      recommendation:
+        !openApiScored || openApi.found
+          ? undefined
+          : "If the site exposes an API, publish an OpenAPI description at /openapi.json so agents can call it correctly.",
+      fix:
+        !openApiScored || openApi.found
+          ? undefined
+          : fix(
+              "json",
+              JSON.stringify(
+                {
+                  openapi: "3.1.0",
+                  info: { title: "Your API", version: "1.0.0" },
+                  paths: {},
+                },
+                null,
+                2,
+              ),
             ),
-          ),
       weight: 1.5,
     }),
   );
@@ -1422,7 +1453,10 @@ Canonical: https://example.com/.well-known/security.txt`,
 // Orchestration
 // ---------------------------------------------------------------------------
 
-export async function analyzeSite(rawInput: string): Promise<AuditResult> {
+export async function analyzeSite(
+  rawInput: string,
+  options: AnalyzeOptions = {},
+): Promise<AuditResult> {
   const startedAt = Date.now();
 
   let requested: URL;
@@ -1437,7 +1471,7 @@ export async function analyzeSite(rawInput: string): Promise<AuditResult> {
     );
   }
 
-  const cacheKey = requested.toString();
+  const cacheKey = `${requested.toString()}::${options.siteType ?? "auto"}`;
   const cached = readCache(cacheKey);
   if (cached) return cached;
 
@@ -1536,6 +1570,7 @@ export async function analyzeSite(rawInput: string): Promise<AuditResult> {
 
   const language = $("html").attr("lang")?.trim() ?? null;
   const metaRobots = extractMetaRobots($);
+  const ogType = $('meta[property="og:type"]').attr("content")?.trim().toLowerCase() ?? null;
 
   const profile: SiteProfile = {
     url: requested.toString(),
@@ -1552,6 +1587,22 @@ export async function analyzeSite(rawInput: string): Promise<AuditResult> {
   const links = extractLinks($, finalUrl);
   const vision = buildVision({ html: homeResponse.body, title, content });
   const xRobotsTag = homeResponse.headers["x-robots-tag"]?.trim() || null;
+
+  const classification = classifySite(
+    {
+      finalUrl: finalUrl.toString(),
+      html: homeResponse.body,
+      title,
+      description,
+      ogType,
+      jsonLdTypes: jsonLd.types,
+      sitemapUrls: sitemap.urls,
+      navUrls: links,
+      llmsTxt: llmsResponse.ok && !looksLikeHtml(llmsResponse.body) ? llmsResponse.body : null,
+      hasOpenApi: openApi.found,
+    },
+    { override: options.siteType ?? null },
+  );
 
   const pillars: AuditPillar[] = [
     buildDiscoveryPillar({
@@ -1570,7 +1621,7 @@ export async function analyzeSite(rawInput: string): Promise<AuditResult> {
       xRobotsTag,
     }),
     buildParseabilityPillar(content),
-    buildStructuredPillar({ jsonLd, openApi, wellKnown }),
+    buildStructuredPillar({ jsonLd, openApi, wellKnown, classification }),
   ].map((pillar) => ({ ...pillar, score: scorePillar(pillar) }));
 
   const score = scoreAudit(pillars);
@@ -1619,6 +1670,7 @@ export async function analyzeSite(rawInput: string): Promise<AuditResult> {
     grade: grade.grade,
     gradeLabel: grade.label,
     pillars,
+    classification,
     profile,
     pages,
     files,

@@ -1,6 +1,53 @@
 export type CheckStatus = "pass" | "warn" | "fail" | "info";
 
 /**
+ * V3 compatibility profiles. The classifier picks one from the raw site;
+ * the user can override it in the workspace or with `?type=`.
+ */
+export type SiteType =
+  "saas" | "portfolio" | "docs" | "ecommerce" | "local-business" | "blog-media";
+
+export type ClassificationMethod = "heuristic" | "override";
+
+export type ClassificationSignalSource =
+  "url" | "hostname" | "structured-data" | "metadata" | "markup" | "manifest" | "fallback";
+
+export interface ClassificationSignal {
+  /** The profile this signal votes for. */
+  type: SiteType;
+  /** Short label shown in the workspace, e.g. "Structured data · TechArticle". */
+  label: string;
+  /** One sentence of supporting evidence. */
+  detail: string;
+  /** Points contributed to the profile score. */
+  weight: number;
+  source: ClassificationSignalSource;
+}
+
+export interface SiteClassification {
+  /** The profile the audit actually uses. */
+  type: SiteType;
+  label: string;
+  /** 0–100. 100 when the user has pinned the profile. */
+  confidence: number;
+  method: ClassificationMethod;
+  /** What the heuristics found, retained even when the profile is overridden. */
+  detected: {
+    type: SiteType;
+    label: string;
+    confidence: number;
+  };
+  /** Top signals behind the automatic decision. */
+  signals: ClassificationSignal[];
+  /** What the profile changes inside the audit. */
+  compatibility: {
+    openApiScored: boolean;
+    recommendedSchema: string[];
+    note: string;
+  };
+}
+
+/**
  * V2 pillars follow the standards the audit actually enforces:
  * discovery manifests, RFC 9309 access, static parseability and
  * structured machine interfaces.
@@ -141,6 +188,7 @@ export interface AuditResult {
   grade: AuditGrade;
   gradeLabel: string;
   pillars: AuditPillar[];
+  classification: SiteClassification;
   profile: SiteProfile;
   pages: AuditPage[];
   files: DiscoveryFile[];
