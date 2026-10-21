@@ -1,0 +1,571 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "LLMReady Audit API",
+    "version": "1.0.0",
+    "summary": "Audit a site for LLM and AI crawler readiness.",
+    "description": "Fetches a site's initial HTML response plus its discovery files, classifies the site into one of six profiles, and returns a weighted four-pillar audit with line-level evidence and copy-paste fixes. Results are cached for five minutes per URL and profile; the public instance allows 30 audits per minute per IP.",
+    "license": {
+      "name": "GPL-3.0-only",
+      "identifier": "GPL-3.0-only"
+    },
+    "contact": {
+      "name": "LLMReady contributors",
+      "url": "https://github.com/ABradwell/llm-seo-toolbox"
+    }
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "This deployment"
+    }
+  ],
+  "security": [],
+  "tags": [
+    {
+      "name": "Audit",
+      "description": "Classify a site and audit its AI discovery surface."
+    }
+  ],
+  "paths": {
+    "/api/audit": {
+      "get": {
+        "operationId": "auditSite",
+        "summary": "Audit a site",
+        "description": "Runs the Discovery, Access, Parseability and Schema pillars against a URL. Supply a bare domain or an absolute URL; a missing scheme defaults to https://.",
+        "tags": ["Audit"],
+        "parameters": [
+          {
+            "name": "url",
+            "in": "query",
+            "required": true,
+            "description": "The site to audit. A bare domain or a full URL. Internal, private and reserved hosts are rejected.",
+            "schema": {
+              "type": "string",
+              "maxLength": 2048
+            },
+            "example": "example.com"
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "description": "Pin a compatibility profile instead of using automatic classification. The detected profile is still returned in classification.detected.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "saas",
+                "portfolio",
+                "docs",
+                "ecommerce",
+                "local-business",
+                "blog-media"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The completed audit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing, invalid or blocked URL, or an unknown site type.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditApiError"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The URL did not return an HTML page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited. Wait for the number of seconds in the Retry-After header.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until another audit can be requested.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The audit failed unexpectedly.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditApiError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The target site could not be fetched or returned an HTTP error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AuditResult": {
+        "type": "object",
+        "required": [
+          "url",
+          "finalUrl",
+          "domain",
+          "score",
+          "grade",
+          "gradeLabel",
+          "pillars",
+          "classification",
+          "profile",
+          "pages",
+          "files",
+          "fixes",
+          "meta"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "The URL as requested."
+          },
+          "finalUrl": {
+            "type": "string",
+            "description": "The URL that served the page after redirects."
+          },
+          "domain": {
+            "type": "string"
+          },
+          "score": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "grade": {
+            "type": "string",
+            "enum": ["A", "B", "C", "D", "F"]
+          },
+          "gradeLabel": {
+            "type": "string",
+            "example": "Nearly ready"
+          },
+          "pillars": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AuditPillar"
+            }
+          },
+          "classification": {
+            "$ref": "#/components/schemas/SiteClassification"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/SiteProfile"
+          },
+          "pages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AuditPage"
+            }
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DiscoveryFile"
+            }
+          },
+          "vision": {
+            "type": "object",
+            "description": "Raw HTML and cleaned markdown previews with payload and token estimates.",
+            "additionalProperties": true
+          },
+          "fixes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QueuedFix"
+            }
+          },
+          "meta": {
+            "type": "object",
+            "required": ["fetchMs", "pageCount", "crawledAt", "cached"],
+            "properties": {
+              "fetchMs": {
+                "type": "integer"
+              },
+              "pageCount": {
+                "type": "integer"
+              },
+              "crawledAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "cached": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      },
+      "AuditPillar": {
+        "type": "object",
+        "required": ["id", "name", "shortName", "description", "score", "checks"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": ["discovery", "access", "parseability", "structured"]
+          },
+          "name": {
+            "type": "string"
+          },
+          "shortName": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "score": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AuditCheck"
+            }
+          }
+        }
+      },
+      "AuditCheck": {
+        "type": "object",
+        "required": ["id", "label", "status", "summary", "detail", "weight"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pass", "warn", "fail", "info"]
+          },
+          "summary": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "recommendation": {
+            "type": "string"
+          },
+          "protocol": {
+            "type": "string"
+          },
+          "evidence": {
+            "$ref": "#/components/schemas/CheckEvidence"
+          },
+          "fix": {
+            "$ref": "#/components/schemas/CheckFix"
+          },
+          "weight": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          }
+        }
+      },
+      "CheckEvidence": {
+        "type": "object",
+        "required": ["file", "line", "snippet"],
+        "properties": {
+          "file": {
+            "type": "string",
+            "example": "/robots.txt"
+          },
+          "line": {
+            "type": ["integer", "null"],
+            "minimum": 1
+          },
+          "snippet": {
+            "type": ["string", "null"]
+          }
+        }
+      },
+      "CheckFix": {
+        "type": "object",
+        "required": ["language", "code"],
+        "properties": {
+          "language": {
+            "type": "string",
+            "enum": ["markdown", "robots", "html", "json", "http", "yaml", "text"]
+          },
+          "code": {
+            "type": "string"
+          }
+        }
+      },
+      "SiteClassification": {
+        "type": "object",
+        "required": ["type", "label", "confidence", "method", "detected", "signals", "compatibility"],
+        "properties": {
+          "type": {
+            "$ref": "#/components/schemas/SiteType"
+          },
+          "label": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "method": {
+            "type": "string",
+            "enum": ["heuristic", "override"]
+          },
+          "detected": {
+            "type": "object",
+            "required": ["type", "label", "confidence"],
+            "properties": {
+              "type": {
+                "$ref": "#/components/schemas/SiteType"
+              },
+              "label": {
+                "type": "string"
+              },
+              "confidence": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100
+              }
+            }
+          },
+          "signals": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["type", "label", "detail", "weight", "source"],
+              "properties": {
+                "type": {
+                  "$ref": "#/components/schemas/SiteType"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "detail": {
+                  "type": "string"
+                },
+                "weight": {
+                  "type": "number"
+                },
+                "source": {
+                  "type": "string",
+                  "enum": [
+                    "url",
+                    "hostname",
+                    "structured-data",
+                    "metadata",
+                    "markup",
+                    "manifest",
+                    "fallback"
+                  ]
+                }
+              }
+            }
+          },
+          "compatibility": {
+            "type": "object",
+            "required": ["openApiScored", "recommendedSchema", "note"],
+            "properties": {
+              "openApiScored": {
+                "type": "boolean"
+              },
+              "recommendedSchema": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "note": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "SiteType": {
+        "type": "string",
+        "enum": ["saas", "portfolio", "docs", "ecommerce", "local-business", "blog-media"]
+      },
+      "SiteProfile": {
+        "type": "object",
+        "required": ["url", "finalUrl", "domain", "title", "description", "siteName", "language"],
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "finalUrl": {
+            "type": "string"
+          },
+          "domain": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "siteName": {
+            "type": "string"
+          },
+          "language": {
+            "type": ["string", "null"]
+          }
+        }
+      },
+      "AuditPage": {
+        "type": "object",
+        "required": ["url", "label", "section", "source"],
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "label": {
+            "type": "string"
+          },
+          "section": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": ["sitemap", "link", "home"]
+          }
+        }
+      },
+      "DiscoveryFile": {
+        "type": "object",
+        "required": ["id", "label", "path", "url", "found", "statusCode", "bytes", "note"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "found": {
+            "type": "boolean"
+          },
+          "statusCode": {
+            "type": ["integer", "null"]
+          },
+          "bytes": {
+            "type": "integer"
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      },
+      "QueuedFix": {
+        "type": "object",
+        "required": ["checkId", "pillarId", "pillarName", "label", "status", "summary", "recommendation", "weight"],
+        "properties": {
+          "checkId": {
+            "type": "string"
+          },
+          "pillarId": {
+            "type": "string"
+          },
+          "pillarName": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["warn", "fail"]
+          },
+          "summary": {
+            "type": "string"
+          },
+          "recommendation": {
+            "type": "string"
+          },
+          "evidence": {
+            "$ref": "#/components/schemas/CheckEvidence"
+          },
+          "fix": {
+            "$ref": "#/components/schemas/CheckFix"
+          },
+          "weight": {
+            "type": "number"
+          }
+        }
+      },
+      "AuditApiError": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": ["code", "message"],
+            "properties": {
+              "code": {
+                "type": "string",
+                "example": "missing_url"
+              },
+              "message": {
+                "type": "string"
+              },
+              "hint": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

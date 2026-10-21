@@ -3,7 +3,7 @@ import "server-only";
 import { assertSafeUrl, UnsafeUrlError } from "./security";
 
 export const AUDIT_USER_AGENT =
-  "LLMReadyBot/0.1 (+https://github.com/aiden/llm-seo-toolbox; automated LLM-readiness audit)";
+  "LLMReadyBot/0.1 (+https://github.com/ABradwell/llm-seo-toolbox; automated LLM-readiness audit)";
 
 export interface FetchTextOptions {
   accept?: string;

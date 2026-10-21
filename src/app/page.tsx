@@ -5,9 +5,7 @@ import { PipelineDiagram } from "@/components/landing/pipeline-diagram";
 import { SiteHeader } from "@/components/landing/site-header";
 import { SpecChecklist } from "@/components/landing/spec-checklist";
 import { TerminalHero } from "@/components/landing/terminal-hero";
-import { siteConfig } from "@/lib/site";
-
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+import { siteConfig, siteUrl } from "@/lib/site";
 
 const structuredData = {
   "@context": "https://schema.org",
