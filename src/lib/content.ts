@@ -34,16 +34,25 @@ export const SCOPE_SELECTORS = ["main", '[role="main"]', "article"] as const;
  */
 export const MIN_SCOPE_TEXT_CHARS = 500;
 
+/** Static-HTML signal-to-noise thresholds, expressed as a share of visible text. */
+export const SNR_PASS = 0.65;
+export const SNR_WARN = 0.45;
+
 type ScopeNode = ReturnType<cheerio.CheerioAPI>;
+type SourceLocation = { startLine?: number; startOffset?: number };
 
 export interface HeadingNode {
   level: number;
   text: string;
+  /** 1-based line in the original HTML response. */
+  line: number | null;
 }
 
 export interface ContentModel {
   /** Selector of the element the content was read from, e.g. `main`. */
   scopeSelector: string;
+  /** 1-based line where the content scope starts in the HTML response. */
+  scopeLine: number | null;
   /** Cleaned inner HTML of the scope, ready to be converted to markdown. */
   cleanHtml: string;
   /** Whitespace-normalised text of the cleaned scope. */
@@ -58,6 +67,15 @@ export interface ContentModel {
   textRatio: number;
   noiseBytes: number;
   noiseRatio: number;
+  /**
+   * Static-HTML signal-to-noise ratio: content text divided by content text
+   * plus navigation, footer, banner and widget text. 1 means no chrome.
+   */
+  snr: number;
+  /** Characters kept as signal for `snr`. */
+  snrSignalChars: number;
+  /** Characters discarded as chrome/widget noise for `snr`. */
+  snrNoiseChars: number;
   headings: HeadingNode[];
   removed: {
     landmarks: number;
@@ -78,6 +96,12 @@ function outerByteLength($: cheerio.CheerioAPI, selector: string): number {
   return total;
 }
 
+function sourceLine(element: unknown): number | null {
+  if (!element || typeof element !== "object") return null;
+  const location = (element as { sourceCodeLocation?: SourceLocation }).sourceCodeLocation;
+  return location?.startLine ?? null;
+}
+
 function extractHeadings($: cheerio.CheerioAPI, scope: ScopeNode): HeadingNode[] {
   const headings: HeadingNode[] = [];
 
@@ -85,7 +109,11 @@ function extractHeadings($: cheerio.CheerioAPI, scope: ScopeNode): HeadingNode[]
     const tag = String($(element).prop("tagName") ?? "").toLowerCase();
     const level = Number.parseInt(tag.replace("h", ""), 10);
     if (!Number.isFinite(level)) return;
-    headings.push({ level, text: normalizeWhitespace($(element).text()).slice(0, 120) });
+    headings.push({
+      level,
+      text: normalizeWhitespace($(element).text()).slice(0, 120),
+      line: sourceLine(element),
+    });
   });
 
   return headings;
@@ -121,15 +149,30 @@ function pickScope($: cheerio.CheerioAPI): { scope: ScopeNode; selector: string 
 }
 
 /**
+ * Text that belongs to repeated chrome rather than the page's content. Only
+ * top-level matches are counted so nested navigation does not inflate noise.
+ */
+function documentNoiseText($: cheerio.CheerioAPI): string {
+  const selector = `${CHROME_SELECTOR}, ${BODY_CHROME_SELECTOR}, ${WIDGET_SELECTOR}`;
+  const nodes = $(selector)
+    .toArray()
+    .filter((element) => $(element).parents(selector).length === 0);
+
+  return normalizeWhitespace(nodes.map((element) => $(element).text()).join(" "));
+}
+
+/**
  * Reads a single HTML document the way an LLM scraper would: pick the content
  * scope, strip page chrome and machine-only markup, then measure what is left.
  */
 export function buildContentModel(html: string): ContentModel {
   const htmlBytes = byteLength(html);
-  const $ = cheerio.load(html);
+  const $ = cheerio.load(html, { sourceCodeLocationInfo: true });
   const noiseBytes = outerByteLength($, NOISE_SELECTOR);
+  const noiseText = documentNoiseText($);
 
   const { scope, selector: scopeSelector } = pickScope($);
+  const scopeLine = sourceLine(scope[0]);
 
   const chromeSelector =
     scopeSelector === "body" ? `${CHROME_SELECTOR}, ${BODY_CHROME_SELECTOR}` : CHROME_SELECTOR;
@@ -151,8 +194,13 @@ export function buildContentModel(html: string): ContentModel {
   const textBytes = byteLength(text);
   const scopeBytes = byteLength(cleanHtml);
 
+  const snrSignalChars = text.length;
+  const snrNoiseChars = noiseText.length;
+  const snrTotal = snrSignalChars + snrNoiseChars;
+
   return {
     scopeSelector,
+    scopeLine,
     cleanHtml,
     text,
     textChars: text.length,
@@ -162,6 +210,9 @@ export function buildContentModel(html: string): ContentModel {
     textRatio: scopeBytes > 0 ? textBytes / scopeBytes : 0,
     noiseBytes,
     noiseRatio: htmlBytes > 0 ? noiseBytes / htmlBytes : 0,
+    snr: snrTotal > 0 ? snrSignalChars / snrTotal : 0,
+    snrSignalChars,
+    snrNoiseChars,
     headings: extractHeadings($, scope),
     removed: { landmarks, widgets: widgetCount, nodes: nodeCount },
   };

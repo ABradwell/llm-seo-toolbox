@@ -17,6 +17,8 @@ export interface FetchTextOutcome {
   status: number;
   finalUrl: string;
   contentType: string;
+  /** Lower-cased response headers, so directive headers can be audited. */
+  headers: Record<string, string>;
   bytes: number;
   body: string;
   truncated: boolean;
@@ -32,6 +34,7 @@ function failure(url: string, error: string, options?: { status?: number; unsafe
     status: options?.status ?? 0,
     finalUrl: url,
     contentType: "",
+    headers: {},
     bytes: 0,
     body: "",
     truncated: false,
@@ -153,11 +156,17 @@ export async function fetchText(
 
     try {
       const { body, bytes, truncated } = await readWithLimit(response, maxBytes);
+      const headers: Record<string, string> = {};
+      for (const [key, value] of response.headers.entries()) {
+        headers[key.toLowerCase()] = value;
+      }
+
       return {
         ok: response.ok,
         status: response.status,
         finalUrl: current.toString(),
-        contentType: response.headers.get("content-type") ?? "",
+        contentType: headers["content-type"] ?? "",
+        headers,
         bytes,
         body,
         truncated,

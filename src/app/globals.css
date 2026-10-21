@@ -1,17 +1,21 @@
 @import "tailwindcss";
 
 :root {
-  --background: #080a08;
-  --foreground: #f0f2e8;
-  --panel: #0e110d;
-  --panel-2: #141813;
-  --muted: #969e91;
-  --line: rgba(240, 242, 232, 0.11);
-  --acid: #c8f169;
-  --acid-strong: #d8ff83;
-  --pass: #a8e56d;
-  --warn: #f3c45a;
-  --fail: #ff7f6b;
+  /* Dark zinc surfaces, one lime signal colour. */
+  --background: #09090b;
+  --foreground: #fafafa;
+  --panel: #111113;
+  --panel-2: #18181b;
+  --panel-3: #202024;
+  --muted: #a1a1aa;
+  --line: rgba(250, 250, 250, 0.12);
+  --line-strong: rgba(250, 250, 250, 0.2);
+  --accent: #c8f169;
+  --accent-strong: #d8ff83;
+  --pass: #a3e635;
+  --warn: #fbbf24;
+  --fail: #fb7185;
+  --radius: 4px;
 }
 
 @theme inline {
@@ -19,16 +23,27 @@
   --color-foreground: var(--foreground);
   --color-panel: var(--panel);
   --color-panel-2: var(--panel-2);
+  --color-panel-3: var(--panel-3);
   --color-muted: var(--muted);
   --color-line: var(--line);
-  --color-acid: var(--acid);
-  --color-acid-strong: var(--acid-strong);
+  --color-line-strong: var(--line-strong);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
   --color-pass: var(--pass);
   --color-warn: var(--warn);
   --color-fail: var(--fail);
   --font-sans: var(--font-space-grotesk);
   --font-mono: var(--font-jetbrains-mono);
-  --font-serif: var(--font-instrument-serif);
+
+  /* Strict low-radius scale: nothing renders larger than 4px. */
+  --radius-xs: 2px;
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 4px;
+  --radius-xl: 4px;
+  --radius-2xl: 4px;
+  --radius-3xl: 4px;
+  --radius-4xl: 4px;
 }
 
 * {
@@ -47,7 +62,7 @@ body {
 }
 
 ::selection {
-  background: var(--acid);
+  background: var(--accent);
   color: #0a0d09;
 }
 
@@ -57,22 +72,22 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: #0b0e0a;
+  background: #0b0b0d;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #2b3228;
-  border: 2px solid #0b0e0a;
-  border-radius: 999px;
+  background: #2b2b31;
+  border: 2px solid #0b0b0d;
+  border-radius: 2px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #3b4536;
+  background: #3f3f46;
 }
 
 :focus-visible {
-  outline: 2px solid var(--acid);
-  outline-offset: 3px;
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 details > summary {
@@ -80,10 +95,7 @@ details > summary {
   cursor: pointer;
 }
 
-details > summary::-webkit-details-marker {
-  display: none;
-}
-
+details > summary::-webkit-details-marker,
 summary::-webkit-details-marker {
   display: none;
 }
@@ -91,7 +103,7 @@ summary::-webkit-details-marker {
 @keyframes rise {
   from {
     opacity: 0;
-    transform: translateY(14px);
+    transform: translateY(10px);
   }
   to {
     opacity: 1;
@@ -99,13 +111,14 @@ summary::-webkit-details-marker {
   }
 }
 
-@keyframes soft-pulse {
+@keyframes blink {
   0%,
-  100% {
-    opacity: 0.55;
-  }
-  50% {
+  49% {
     opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
   }
 }
 
@@ -118,42 +131,42 @@ summary::-webkit-details-marker {
   }
 }
 
-@keyframes drift {
+@keyframes scan {
   from {
-    transform: translate3d(0, 0, 0);
+    transform: translateY(-100%);
   }
   to {
-    transform: translate3d(0, -28px, 0);
+    transform: translateY(1000%);
   }
 }
 
 @utility rise-in {
-  animation: rise 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: rise 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-@utility panel-glow {
-  box-shadow:
-    0 0 0 1px rgba(200, 241, 105, 0.08),
-    0 24px 90px -40px rgba(200, 241, 105, 0.22);
-}
-
-@utility grid-lines {
+@utility terminal-grid {
   background-image:
-    linear-gradient(to right, rgba(240, 242, 232, 0.055) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(240, 242, 232, 0.055) 1px, transparent 1px);
-  background-size: 64px 64px;
+    linear-gradient(to right, rgba(250, 250, 250, 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(250, 250, 250, 0.04) 1px, transparent 1px);
+  background-size: 32px 32px;
 }
 
-@utility dot-grid {
-  background-image: radial-gradient(rgba(240, 242, 232, 0.14) 1px, transparent 1px);
-  background-size: 22px 22px;
+@utility scanlines {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    rgba(250, 250, 250, 0.025) 0,
+    rgba(250, 250, 250, 0.025) 1px,
+    transparent 1px,
+    transparent 4px
+  );
 }
 
-@utility text-gradient {
-  background: linear-gradient(110deg, #f0f2e8 20%, #c8f169 58%, #f0f2e8 90%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+@utility caret {
+  animation: blink 1.1s step-end infinite;
+}
+
+@utility scan-line {
+  animation: scan 7s linear infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {

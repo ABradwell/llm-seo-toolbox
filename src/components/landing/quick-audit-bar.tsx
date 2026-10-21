@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, Globe2, Loader2 } from "lucide-react";
+import { ArrowRight, Loader2, Search } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useId, useState, useTransition } from "react";
 
@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { UrlInputError, normalizeUserUrl } from "@/lib/url";
 import { cn } from "@/lib/utils";
 
-export interface ScanFormProps {
+export interface QuickAuditBarProps {
   size?: "hero" | "compact" | "default";
   defaultValue?: string;
   className?: string;
@@ -16,13 +16,14 @@ export interface ScanFormProps {
   placeholder?: string;
 }
 
-export function ScanForm({
+/** Dense URL input shared by the landing hero and the workspace header. */
+export function QuickAuditBar({
   size = "default",
   defaultValue = "",
   className,
   buttonLabel = "Run audit",
-  placeholder = "example.com or docs.example.com/start",
-}: ScanFormProps) {
+  placeholder = "https://example.com",
+}: QuickAuditBarProps) {
   const router = useRouter();
   const inputId = useId();
   const [value, setValue] = useState(defaultValue);
@@ -53,19 +54,16 @@ export function ScanForm({
     <form onSubmit={submit} className={cn("w-full", className)} noValidate>
       <div
         className={cn(
-          "group flex w-full items-center gap-2 border border-line bg-panel/85 backdrop-blur transition-colors focus-within:border-acid/50",
-          hero ? "rounded-2xl p-2.5" : compact ? "rounded-xl p-1.5" : "rounded-xl p-2",
+          "flex w-full items-center gap-1 rounded-[4px] border border-line bg-panel transition-colors focus-within:border-accent/60",
+          hero ? "p-1.5" : "p-1",
         )}
       >
-        <Globe2
-          className={cn(
-            "ml-1.5 shrink-0 text-muted transition-colors group-focus-within:text-acid",
-            hero ? "size-5" : "size-4",
-          )}
+        <Search
+          className={cn("ml-1.5 shrink-0 text-muted", hero ? "size-4" : "size-3.5")}
           aria-hidden="true"
         />
         <label htmlFor={inputId} className="sr-only">
-          Domain to audit
+          Domain or URL to audit
         </label>
         <input
           id={inputId}
@@ -79,8 +77,8 @@ export function ScanForm({
           autoComplete="url"
           spellCheck={false}
           className={cn(
-            "min-w-0 flex-1 bg-transparent placeholder:text-muted/60 focus:outline-none",
-            hero ? "h-11 px-1 text-base" : compact ? "h-8 px-1 text-sm" : "h-9 px-1 text-sm",
+            "min-w-0 flex-1 bg-transparent px-1 font-mono placeholder:text-muted/50 focus:outline-none",
+            hero ? "h-10 text-sm" : compact ? "h-7 text-xs" : "h-8 text-sm",
           )}
         />
         <Button
@@ -94,11 +92,11 @@ export function ScanForm({
           ) : (
             <ArrowRight aria-hidden="true" />
           )}
-          <span className={hero ? "" : "hidden sm:inline"}>{buttonLabel}</span>
+          <span className={compact ? "sr-only" : ""}>{buttonLabel}</span>
         </Button>
       </div>
       {error ? (
-        <p className="mt-2 pl-1 font-mono text-xs text-fail" role="alert">
+        <p className="mt-1.5 pl-1 font-mono text-[11px] text-fail" role="alert">
           {error}
         </p>
       ) : null}

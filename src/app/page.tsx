@@ -1,24 +1,39 @@
 import { CoffeeBanner } from "@/components/landing/coffee-banner";
-import { CodeShowcase } from "@/components/landing/code-showcase";
 import { CrawlerStrip } from "@/components/landing/crawler-strip";
-import { FeatureGrid } from "@/components/landing/feature-grid";
 import { SiteFooter } from "@/components/landing/footer";
-import { Hero } from "@/components/landing/hero";
-import { HowItWorks } from "@/components/landing/how-it-works";
-import { SampleSites } from "@/components/landing/sample-sites";
 import { SiteHeader } from "@/components/landing/site-header";
+import { SpecChecklist } from "@/components/landing/spec-checklist";
+import { TerminalHero } from "@/components/landing/terminal-hero";
+import { siteConfig } from "@/lib/site";
+
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+
+const structuredData = {
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  name: "LLMReady",
+  applicationCategory: "DeveloperApplication",
+  operatingSystem: "Web",
+  url: siteUrl,
+  description: siteConfig.description,
+  isAccessibleForFree: true,
+  offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+  license: "https://www.gnu.org/licenses/gpl-3.0.html",
+  sameAs: [siteConfig.github, siteConfig.llmsTxtSpec, siteConfig.rfc9309],
+};
 
 export default function HomePage() {
   return (
     <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
+      />
       <SiteHeader />
       <main className="flex-1">
-        <Hero />
+        <TerminalHero />
         <CrawlerStrip />
-        <FeatureGrid />
-        <HowItWorks />
-        <CodeShowcase />
-        <SampleSites />
+        <SpecChecklist />
         <CoffeeBanner />
       </main>
       <SiteFooter />

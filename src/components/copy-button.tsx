@@ -54,7 +54,7 @@ export function CopyButton({
   return (
     <Button
       type="button"
-      variant="secondary"
+      variant="ghost"
       size="sm"
       onClick={copy}
       className={cn(className)}
