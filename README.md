@@ -6,13 +6,13 @@
 
 Audit the four things that decide whether an AI crawler can find, read and classify your site: `/llms.txt`, RFC 9309 access rules, static HTML parseability and schema.org metadata. Before the checks run, LLMReady classifies the site into one of six profiles so the audit only scores what matters for that kind of site.
 
-[![CI](https://github.com/aiden/llm-seo-toolbox/actions/workflows/ci.yml/badge.svg)](https://github.com/aiden/llm-seo-toolbox/actions/workflows/ci.yml)
+[![CI](https://github.com/ABradwell/llm-seo-toolbox/actions/workflows/ci.yml/badge.svg)](https://github.com/ABradwell/llm-seo-toolbox/actions/workflows/ci.yml)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0--only-blue.svg)](LICENSE)
 [![Next.js 16](https://img.shields.io/badge/Next.js-16-black.svg)](https://nextjs.org)
 [![pnpm](https://img.shields.io/badge/pnpm-10-orange.svg)](https://pnpm.io)
-[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/aiden/llm-seo-toolbox/pulls)
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/ABradwell/llm-seo-toolbox/pulls)
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Faiden%2Fllm-seo-toolbox)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FABradwell%2Fllm-seo-toolbox)
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-support%20the%20project-FFDD00?logo=buymeacoffee&logoColor=black)](https://www.buymeacoffee.com)
 
 </div>
@@ -48,7 +48,7 @@ Above the tabs, the **site classification panel** shows the detected profile, co
 ## Quick start
 
 ```bash
-git clone https://github.com/aiden/llm-seo-toolbox
+git clone https://github.com/ABradwell/llm-seo-toolbox
 cd llm-seo-toolbox
 pnpm install
 pnpm dev
@@ -75,11 +75,11 @@ Requirements: **Node 20.9+** (CI uses Node 22) and **pnpm 10+**.
 
 All variables are optional; the app works out of the box.
 
-| Variable                 | Default                                    | Used for                                          |
-| :----------------------- | :----------------------------------------- | :------------------------------------------------ |
-| `NEXT_PUBLIC_SITE_URL`   | `http://localhost:3000`                    | Canonical metadata and OG tags.                   |
-| `NEXT_PUBLIC_GITHUB_URL` | `https://github.com/aiden/llm-seo-toolbox` | Header, footer and landing page repository links. |
-| `NEXT_PUBLIC_BMC_URL`    | `https://www.buymeacoffee.com`             | Buy Me a Coffee links in the header and footer.   |
+| Variable                 | Default                                             | Used for                                          |
+| :----------------------- | :-------------------------------------------------- | :------------------------------------------------ |
+| `NEXT_PUBLIC_SITE_URL`   | Vercel production URL, else `http://localhost:3000` | Canonical metadata, sitemap and robots.txt URLs.  |
+| `NEXT_PUBLIC_GITHUB_URL` | `https://github.com/ABradwell/llm-seo-toolbox`      | Header, footer and landing page repository links. |
+| `NEXT_PUBLIC_BMC_URL`    | `https://www.buymeacoffee.com`                      | Buy Me a Coffee links in the header and footer.   |
 
 Copy [`.env.example`](.env.example) to `.env.local` to override them.
 
@@ -295,7 +295,19 @@ Behaviour notes:
 - **Cache:** identical URLs and profile overrides are memoized for 5 minutes per server instance (`meta.cached` tells you which one you got, and `x-audit-cache` repeats it as a header).
 - **Rate limit:** 30 requests per minute per IP, sliding window, in memory.
 - **Duration:** the route declares `maxDuration = 60`; audits usually finish in 1–3 seconds.
-- **User agent:** `LLMReadyBot/0.1 (+https://github.com/aiden/llm-seo-toolbox; automated LLM-readiness audit)`.
+- **User agent:** `LLMReadyBot/0.1 (+https://github.com/ABradwell/llm-seo-toolbox; automated LLM-readiness audit)`.
+
+### Discovery surface
+
+The deployment practices what it audits. These files are generated from the same site URL used for canonical metadata:
+
+| File                          | Source                            | Purpose                                                             |
+| :---------------------------- | :-------------------------------- | :------------------------------------------------------------------ |
+| `/robots.txt`                 | `src/app/robots.ts`               | Wildcard plus named AI crawler groups, with a `Sitemap:` directive. |
+| `/sitemap.xml`                | `src/app/sitemap.ts`              | Canonical URLs for the landing page and workspace.                  |
+| `/openapi.json`               | `public/openapi.json`             | OpenAPI 3.1 description of `GET /api/audit`.                        |
+| `/.well-known/security.txt`   | `public/.well-known/security.txt` | RFC 9116 security contact and expiry.                               |
+| `/llms.txt`, `/llms-full.txt` | `public/`                         | Curated index and full context bundle for agents.                   |
 
 ## How the engine works
 

@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { JetBrains_Mono, Space_Grotesk } from "next/font/google";
 
+import { siteUrl } from "@/lib/site";
+
 import "./globals.css";
 
 const sans = Space_Grotesk({
@@ -14,8 +16,6 @@ const mono = JetBrains_Mono({
   subsets: ["latin"],
   display: "swap",
 });
-
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),

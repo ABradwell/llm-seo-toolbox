@@ -64,5 +64,5 @@ A bare domain or a full URL is accepted. Add `type=docs` (or `saas`, `portfolio`
 - llms.txt specification: https://llmstxt.org/
 - RFC 9309: https://www.rfc-editor.org/rfc/rfc9309
 - schema.org: https://schema.org/
-- Source code: https://github.com/aiden/llm-seo-toolbox
+- Source code: https://github.com/ABradwell/llm-seo-toolbox
 - License: GPL-3.0-only

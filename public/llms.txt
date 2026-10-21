@@ -4,10 +4,10 @@
 
 ## Product
 
-- [Audit workspace](https://github.com/aiden/llm-seo-toolbox#readme): Classify a site, run the 20-check audit matrix and inspect line-level fixes.
-- [Site classification](https://github.com/aiden/llm-seo-toolbox#site-classification): The six profiles and the signals behind them, with manual override.
-- [Live specification checklist](https://github.com/aiden/llm-seo-toolbox#scoring-model): The checks the audit enforces, with pass conditions.
-- [API](https://github.com/aiden/llm-seo-toolbox#api): `GET /api/audit?url=example.com` returns the full JSON report, including `classification`.
+- [Audit workspace](https://github.com/ABradwell/llm-seo-toolbox#readme): Classify a site, run the 20-check audit matrix and inspect line-level fixes.
+- [Site classification](https://github.com/ABradwell/llm-seo-toolbox#site-classification): The six profiles and the signals behind them, with manual override.
+- [Live specification checklist](https://github.com/ABradwell/llm-seo-toolbox#scoring-model): The checks the audit enforces, with pass conditions.
+- [API](https://github.com/ABradwell/llm-seo-toolbox#api): `GET /api/audit?url=example.com` returns the full JSON report, including `classification`.
 
 ## Standards
 
@@ -15,13 +15,21 @@
 - [RFC 9309](https://www.rfc-editor.org/rfc/rfc9309): Robots Exclusion Protocol.
 - [schema.org](https://schema.org/): Structured data vocabularies used by the audit.
 
+## Machine-readable
+
+- [OpenAPI description](https://llm-seo-toolbox.vercel.app/openapi.json): OpenAPI 3.1 schema for `GET /api/audit`.
+- [Sitemap](https://llm-seo-toolbox.vercel.app/sitemap.xml): Canonical pages on this deployment.
+- [Robots policy](https://llm-seo-toolbox.vercel.app/robots.txt): RFC 9309 rules with named AI crawler groups.
+- [Security contact](https://llm-seo-toolbox.vercel.app/.well-known/security.txt): RFC 9116 vulnerability disclosure details.
+- [Expanded context](https://llm-seo-toolbox.vercel.app/llms-full.txt): The full audit model in one request.
+
 ## Project
 
-- [Source code](https://github.com/aiden/llm-seo-toolbox): GPL-3.0-only.
-- [Deploy on Vercel](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Faiden%2Fllm-seo-toolbox): One-click deployment.
+- [Source code](https://github.com/ABradwell/llm-seo-toolbox): GPL-3.0-only.
+- [Deploy on Vercel](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FABradwell%2Fllm-seo-toolbox): One-click deployment.
 - [Buy me a coffee](https://www.buymeacoffee.com): Support the project.
 
 ## Optional
 
-- [Issues](https://github.com/aiden/llm-seo-toolbox/issues): Report a bug or request a check.
-- [Contributing](https://github.com/aiden/llm-seo-toolbox/blob/main/README.md#contributing): Run the full validation suite before opening a PR.
+- [Issues](https://github.com/ABradwell/llm-seo-toolbox/issues): Report a bug or request a check.
+- [Contributing](https://github.com/ABradwell/llm-seo-toolbox/blob/main/README.md#contributing): Run the full validation suite before opening a PR.

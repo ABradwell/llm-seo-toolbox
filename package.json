@@ -4,13 +4,13 @@
   "private": true,
   "description": "An open-source audit and authoring studio for LLM-ready websites.",
   "license": "GPL-3.0-only",
-  "homepage": "https://github.com/aiden/llm-seo-toolbox#readme",
+  "homepage": "https://github.com/ABradwell/llm-seo-toolbox#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/aiden/llm-seo-toolbox.git"
+    "url": "https://github.com/ABradwell/llm-seo-toolbox.git"
   },
   "bugs": {
-    "url": "https://github.com/aiden/llm-seo-toolbox/issues"
+    "url": "https://github.com/ABradwell/llm-seo-toolbox/issues"
   },
   "engines": {
     "node": ">=20.9"
