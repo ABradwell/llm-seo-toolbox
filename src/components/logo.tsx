@@ -47,7 +47,7 @@ export function Logo({
       <LogoMark className={markClassName} />
       {wordmark ? (
         <span className="font-mono text-sm font-semibold tracking-tight">
-          LLM<span className="text-accent">Ready</span>
+          LLM<span className="text-accent-strong">Ready</span>
         </span>
       ) : null}
     </Link>
