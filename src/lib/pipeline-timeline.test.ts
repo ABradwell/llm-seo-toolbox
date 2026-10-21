@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import { PIPELINE_STEPS, PIPELINE_TOTAL_MS } from "./pipeline-steps";
 import {
   CACHED_RATE,
-  CATCH_UP_RATE,
   HOLD_AT_MS,
   MAX_FRAME_MS,
   advance,
@@ -64,18 +63,16 @@ describe("pipeline timeline", () => {
 
   it("finishes shortly after a slow response", () => {
     const timeline = play(7_000);
-    const remaining = (PIPELINE_TOTAL_MS - HOLD_AT_MS) / CATCH_UP_RATE;
+    const remaining = PIPELINE_TOTAL_MS - HOLD_AT_MS;
     expect(snapshot(timeline).done).toBe(true);
     expect(timeline.elapsed).toBeLessThanOrEqual(7_000 + remaining + FRAME * 2);
   });
 
-  it("speeds up once a fast response arrives", () => {
+  it("runs the full sequence even when the response arrives early", () => {
     const timeline = play(900);
     expect(snapshot(timeline).done).toBe(true);
-    expect(timeline.elapsed).toBeLessThan(PIPELINE_TOTAL_MS);
-    expect(timeline.elapsed).toBeGreaterThan(
-      900 + (PIPELINE_TOTAL_MS - 900) / CATCH_UP_RATE - FRAME,
-    );
+    expect(timeline.elapsed).toBeGreaterThanOrEqual(PIPELINE_TOTAL_MS);
+    expect(timeline.elapsed).toBeLessThanOrEqual(PIPELINE_TOTAL_MS + FRAME * 2);
   });
 
   it("plays a cached audit at the cached rate", () => {

@@ -93,6 +93,7 @@ describe("pipeline steps", () => {
     expect(PIPELINE_STEPS).toHaveLength(13);
     expect(new Set(PIPELINE_STEPS.map((step) => step.id)).size).toBe(13);
     const last = PIPELINE_STEPS.at(-1)!;
+    expect(PIPELINE_TOTAL_MS).toBe(7_000);
     expect(last.start + last.ms).toBe(PIPELINE_TOTAL_MS);
   });
 
