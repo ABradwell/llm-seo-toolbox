@@ -1,12 +1,13 @@
 # LLMReady
 
-> An open-source spec-compliance auditor for AI discovery. Validate /llms.txt, RFC 9309 robots.txt, static HTML signal-to-noise and schema.org metadata.
+> An open-source AI compatibility auditor. Classify a site into one of six profiles, then validate /llms.txt, RFC 9309 robots.txt, static HTML signal-to-noise and profile-specific schema.org metadata.
 
 ## Product
 
-- [Audit workspace](https://github.com/aiden/llm-seo-toolbox#readme): Run the 20-check audit matrix and inspect line-level fixes.
+- [Audit workspace](https://github.com/aiden/llm-seo-toolbox#readme): Classify a site, run the 20-check audit matrix and inspect line-level fixes.
+- [Site classification](https://github.com/aiden/llm-seo-toolbox#site-classification): The six profiles and the signals behind them, with manual override.
 - [Live specification checklist](https://github.com/aiden/llm-seo-toolbox#scoring-model): The checks the audit enforces, with pass conditions.
-- [API](https://github.com/aiden/llm-seo-toolbox#api): `GET /api/audit?url=example.com` returns the full JSON report.
+- [API](https://github.com/aiden/llm-seo-toolbox#api): `GET /api/audit?url=example.com` returns the full JSON report, including `classification`.
 
 ## Standards
 

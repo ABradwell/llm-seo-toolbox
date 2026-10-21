@@ -6,7 +6,7 @@ import { Workspace, WorkspaceSkeleton } from "@/components/workspace/workspace";
 export const metadata: Metadata = {
   title: "Audit workspace",
   description:
-    "Run the V2 audit matrix: llms.txt structure, RFC 9309 crawler access, static HTML signal-to-noise and schema.org metadata.",
+    "Run the V3 audit pipeline: site classification, llms.txt structure, RFC 9309 crawler access, static HTML signal-to-noise and profile-aware schema.org metadata.",
 };
 
 export default function AppPage() {

@@ -24,7 +24,7 @@ export const metadata: Metadata = {
     template: "%s · LLMReady",
   },
   description:
-    "Audit /llms.txt, RFC 9309 robots.txt, static HTML signal-to-noise and schema.org metadata. An open-source spec-compliance auditor for Gemini, Claude and AI search crawlers.",
+    "Classify any site, then audit /llms.txt, RFC 9309 robots.txt, static HTML signal-to-noise and profile-specific schema.org metadata. An open-source AI compatibility auditor for Gemini, Claude and AI search crawlers.",
   keywords: [
     "llms.txt",
     "llms-full.txt",
@@ -33,6 +33,7 @@ export const metadata: Metadata = {
     "Google-Extended",
     "ClaudeBot",
     "GPTBot",
+    "site classification",
     "LLM SEO",
     "GEO",
     "structured data",
@@ -45,13 +46,13 @@ export const metadata: Metadata = {
     siteName: "LLMReady",
     title: "LLMReady — Spec compliance for AI discovery",
     description:
-      "Validate the manifests, access rules and parseability signals AI crawlers depend on. Open source, no signup.",
+      "Classify a site, then validate the manifests, access rules and parseability signals AI crawlers depend on. Open source, no signup.",
   },
   twitter: {
     card: "summary_large_image",
     title: "LLMReady — Spec compliance for AI discovery",
     description:
-      "Audit /llms.txt, robots.txt access for AI agents, static HTML SNR and schema.org metadata.",
+      "Classify a site, then audit /llms.txt, robots.txt access for AI agents, static HTML SNR and profile-specific schema.org metadata.",
   },
   robots: {
     index: true,

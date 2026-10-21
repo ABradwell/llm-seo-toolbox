@@ -12,6 +12,7 @@ const LINES: TerminalLine[] = [
   { kind: "pass", text: "GET /robots.txt          200  GPTBot allow · ClaudeBot allow" },
   { kind: "pass", text: "GET /sitemap.xml         200  1,204 URLs · robots directive L12" },
   { kind: "pass", text: "GET / (initial HTML)      48 KB  SNR 71% · 12,840 chars" },
+  { kind: "info", text: "classify                 docs · 86% · TechArticle + 9 /docs paths" },
   { kind: "warn", text: "schema.org               TechArticle found · FAQPage missing" },
   { kind: "info", text: "result                   18 pass · 2 warn · 0 fail  →  94 / A" },
 ];
@@ -29,7 +30,7 @@ export function LiveTerminal() {
           reference run
         </div>
         <span className="truncate font-mono text-[10px] text-code-muted/70">
-          v2 · standard checks
+          v3 · classify + audit
         </span>
       </div>
 

@@ -4,7 +4,7 @@
 
 **Spec compliance for AI discovery.**
 
-Audit the four things that decide whether an AI crawler can find, read and classify your site: `/llms.txt`, RFC 9309 access rules, static HTML parseability and schema.org metadata.
+Audit the four things that decide whether an AI crawler can find, read and classify your site: `/llms.txt`, RFC 9309 access rules, static HTML parseability and schema.org metadata. Before the checks run, LLMReady classifies the site into one of six profiles so the audit only scores what matters for that kind of site.
 
 [![CI](https://github.com/aiden/llm-seo-toolbox/actions/workflows/ci.yml/badge.svg)](https://github.com/aiden/llm-seo-toolbox/actions/workflows/ci.yml)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0--only-blue.svg)](LICENSE)
@@ -33,9 +33,11 @@ No accounts, no database, no JavaScript execution against the target site.
 
 ### Landing page — `/`
 
-A terminal hero with a quick audit bar. Below it, a **live specification checklist** runs the real `/api/audit` engine against a selected preset (`Next.js`, `Python Docs`, `Stripe API`, `Tailwind CSS`) and resolves the Discovery, Access and Structure rows in place — no mocked screenshots. The page closes with the crawler reference strip, GitHub, Vercel deploy and Buy Me a Coffee links.
+A terminal hero with a quick audit bar. Below it, a **three-step pipeline** shows how the raw site becomes a site classification and then a profile-specific AI compatibility score. Next, a **live specification checklist** runs the real `/api/audit` engine against a selected preset (`Next.js`, `Python Docs`, `Stripe API`, `Tailwind CSS`) and resolves the Discovery, Access and Structure rows in place — no mocked screenshots. The page closes with the crawler reference strip, GitHub, Vercel deploy and Buy Me a Coffee links.
 
 ### Workspace — `/app`
+
+Above the tabs, the **site classification panel** shows the detected profile, confidence, the signals behind it and the compatibility rules it applies. The profile select re-runs the audit with a `type` parameter, so an override is shareable and cached separately from the automatic result.
 
 | Tab                   | What it does                                                                                                                                                                                                             |
 | :-------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -79,6 +81,31 @@ All variables are optional; the app works out of the box.
 | `NEXT_PUBLIC_BMC_URL`    | `https://www.buymeacoffee.com`             | Buy Me a Coffee links in the header and footer.   |
 
 Copy [`.env.example`](.env.example) to `.env.local` to override them.
+
+## Site classification
+
+Every audit starts with the raw site. The classifier is deterministic, runs in-process and adds no network requests: it scores signals that were already collected during the scan.
+
+| Profile          | Strong signals                                                                   | Compatibility effect                                   |
+| :--------------- | :------------------------------------------------------------------------------- | :----------------------------------------------------- |
+| `saas`           | `SoftwareApplication`/`WebApplication`, pricing and feature paths, product CTAs. | OpenAPI scored; `SoftwareApplication` schema expected. |
+| `portfolio`      | `Person`/`ProfilePage`, `/work` and case-study paths, portfolio copy.            | OpenAPI not scored; `Person` schema expected.          |
+| `docs`           | `TechArticle`/`APIReference`, docs and reference paths, code-block-heavy HTML.   | OpenAPI scored; `TechArticle` schema expected.         |
+| `ecommerce`      | `Product`/`Offer`, product and cart paths, add-to-cart or price markup.          | OpenAPI not scored; `Product` schema expected.         |
+| `local-business` | `LocalBusiness` subtype, location/service paths, address or phone markup.        | OpenAPI not scored; `LocalBusiness` schema expected.   |
+| `blog-media`     | `Article`/`NewsArticle`, blog and author paths, repeated article/time markup.    | OpenAPI not scored; `Article` schema expected.         |
+
+The classifier also reads hostname prefixes (`docs.`, `blog.`, `shop.`, `store.`, `portfolio.`, `app.`), `og:type`, title and description copy, and the `llms.txt` index. The highest additive score wins. The API returns the top signals, a confidence value and the winning profile.
+
+### Override the profile
+
+The workspace select pins a profile for the current URL. The same override is available in the API:
+
+```http
+GET /api/audit?url=example.com&type=portfolio
+```
+
+Accepted values are `saas`, `portfolio`, `docs`, `ecommerce`, `local-business` and `blog-media`. Omit `type` to classify automatically. Overrides are cached separately from the automatic audit, and the automatic result stays in the response as `classification.detected` so you can see what the heuristics would have chosen.
 
 ## Scoring model
 
@@ -129,20 +156,21 @@ The content region is `main`, else `[role="main"]`, else the richest `article`, 
 
 ### 4. Structured Machine Interfaces
 
-| Check                   | Weight | Passing means                                                                                                    |
-| :---------------------- | :----- | :--------------------------------------------------------------------------------------------------------------- |
-| JSON-LD presence/syntax | 2.5    | At least one `application/ld+json` block parses, with `@context`/`@type` when present.                           |
-| Recommended schema type | 1.5    | One of `TechArticle`, `FAQPage` or `SoftwareApplication` is present (other valid schema types warn, not fail).   |
-| OpenAPI description     | 1.5    | `/openapi.json`, `/.well-known/openapi.json` or `/openapi.yaml` looks like an OpenAPI document.                  |
-| `.well-known` discovery | 0.5    | `security.txt` or `ai-plugin.json` is present and valid. Low weight because it is an optional discovery surface. |
+| Check                   | Weight | Passing means                                                                                                                  |
+| :---------------------- | :----- | :----------------------------------------------------------------------------------------------------------------------------- |
+| JSON-LD presence/syntax | 2.5    | At least one `application/ld+json` block parses, with `@context`/`@type` when present.                                         |
+| Profile schema types    | 1.5    | One of the profile's expected types is present — e.g. `TechArticle` for docs, `Product` for e-commerce.                        |
+| OpenAPI description     | 1.5    | `/openapi.json`, `/.well-known/openapi.json` or `/openapi.yaml` looks like an OpenAPI document. Scored only for SaaS and docs. |
+| `.well-known` discovery | 0.5    | `security.txt` or `ai-plugin.json` is present and valid. Low weight because it is an optional discovery surface.               |
 
 ## API
 
 ```http
 GET /api/audit?url=example.com
+GET /api/audit?url=example.com&type=docs
 ```
 
-`url` accepts a bare domain or a full URL; missing schemes default to `https://`.
+`url` accepts a bare domain or a full URL; missing schemes default to `https://`. `type` is optional and pins the site profile instead of using automatic classification.
 
 ```jsonc
 {
@@ -152,6 +180,27 @@ GET /api/audit?url=example.com
   "score": 78,
   "grade": "B",
   "gradeLabel": "Nearly ready",
+  "classification": {
+    "type": "docs",
+    "label": "Documentation",
+    "confidence": 86,
+    "method": "heuristic",
+    "detected": { "type": "docs", "label": "Documentation", "confidence": 86 },
+    "signals": [
+      {
+        "type": "docs",
+        "label": "Structured data · TechArticle",
+        "detail": "JSON-LD declares TechArticle, which is characteristic of this profile.",
+        "weight": 16,
+        "source": "structured-data",
+      },
+    ],
+    "compatibility": {
+      "openApiScored": true,
+      "recommendedSchema": ["TechArticle", "APIReference", "FAQPage"],
+      "note": "OpenAPI is scored. Schema expectations focus on TechArticle, APIReference and FAQPage.",
+    },
+  },
   "pillars": [
     {
       "id": "discovery",
@@ -228,20 +277,21 @@ GET /api/audit?url=example.com
 
 Errors are returned as `{ "error": { "code", "message", "hint?" } }`.
 
-| Status | Code             | Meaning                                                                |
-| :----- | :--------------- | :--------------------------------------------------------------------- |
-| 400    | `missing_url`    | No `url` query parameter.                                              |
-| 400    | `invalid_url`    | The URL is longer than 2048 characters.                                |
-| 400    | `blocked_url`    | Private, loopback or reserved host, or an unsafe redirect target.      |
-| 415    | `not_html`       | The URL returned something that is not an HTML page.                   |
-| 429    | `rate_limited`   | More than 30 audits per minute from one IP (`retry-after` is set).     |
-| 500    | `internal_error` | Unexpected failure.                                                    |
-| 502    | `fetch_failed`   | Timeout, DNS failure or connection error.                              |
-| 502    | `http_error`     | The target answered with 4xx/5xx (`403` usually means bot protection). |
+| Status | Code                | Meaning                                                                |
+| :----- | :------------------ | :--------------------------------------------------------------------- |
+| 400    | `missing_url`       | No `url` query parameter.                                              |
+| 400    | `invalid_url`       | The URL is longer than 2048 characters.                                |
+| 400    | `invalid_site_type` | `type` is not one of the six accepted profile ids.                     |
+| 400    | `blocked_url`       | Private, loopback or reserved host, or an unsafe redirect target.      |
+| 415    | `not_html`          | The URL returned something that is not an HTML page.                   |
+| 429    | `rate_limited`      | More than 30 audits per minute from one IP (`retry-after` is set).     |
+| 500    | `internal_error`    | Unexpected failure.                                                    |
+| 502    | `fetch_failed`      | Timeout, DNS failure or connection error.                              |
+| 502    | `http_error`        | The target answered with 4xx/5xx (`403` usually means bot protection). |
 
 Behaviour notes:
 
-- **Cache:** identical URLs are memoized for 5 minutes per server instance (`meta.cached` tells you which one you got, and `x-audit-cache` repeats it as a header).
+- **Cache:** identical URLs and profile overrides are memoized for 5 minutes per server instance (`meta.cached` tells you which one you got, and `x-audit-cache` repeats it as a header).
 - **Rate limit:** 30 requests per minute per IP, sliding window, in memory.
 - **Duration:** the route declares `maxDuration = 60`; audits usually finish in 1–3 seconds.
 - **User agent:** `LLMReadyBot/0.1 (+https://github.com/aiden/llm-seo-toolbox; automated LLM-readiness audit)`.
@@ -254,7 +304,8 @@ Behaviour notes:
 4. **Validate the manifests.** `llms.txt` is parsed for one H1, a blockquote summary, H2 sections, markdown links and pagination markers. Invalid files fail; missing optional files warn.
 5. **Parse access.** RFC 9309 groups are matched per AI user agent, including wildcard and end-anchor paths. `X-Robots-Tag` and `robots` meta directives are evaluated separately from the file.
 6. **Model the content.** Scripts, styles, SVGs, forms, frames, navigation, banners and hidden nodes are stripped. The content region drives the heading outline, SNR, SSR check and evidence line numbers.
-7. **Build the LLM view.** The cleaned region is converted to markdown for the simulator and the `llms-full.txt` draft, then the score and prioritized fix queue are assembled.
+7. **Classify the site.** Hostname, sitemap and navigation paths, JSON-LD, `og:type`, copy, markup and `llms.txt` vote for one of six profiles — no extra requests. The winning profile sets expected schema types and whether OpenAPI is scored.
+8. **Build the LLM view.** The cleaned region is converted to markdown for the simulator and the `llms-full.txt` draft, then the score and prioritized fix queue are assembled.
 
 Because nothing is rendered in a browser, the audit reports what is **in the initial HTML response** — exactly what a non-JS crawler sees. Client-rendered content is reported as such rather than silently scored as missing.
 
@@ -268,17 +319,18 @@ Because nothing is rendered in a browser, the audit reports what is **in the ini
 ├── public/                  # Static assets
 └── src/
     ├── app/
-    │   ├── page.tsx         # Landing: terminal hero + live checklist
+    │   ├── page.tsx         # Landing: terminal hero, pipeline diagram, live checklist
     │   ├── app/page.tsx     # Workspace shell
     │   ├── api/audit/       # Analysis endpoint
     │   ├── layout.tsx
     │   └── globals.css      # Tailwind v4 zinc theme, 4px radius scale
     ├── components/
-    │   ├── landing/         # Terminal hero, live checklist, header/footer
-    │   ├── workspace/       # Audit matrix, llms.txt editor, scraper simulator
+    │   ├── landing/         # Terminal hero, pipeline diagram, live checklist, header/footer
+    │   ├── workspace/       # Classification panel, audit matrix, llms.txt editor, simulator
     │   └── ui/              # Low-radius shadcn-style primitives
     ├── lib/
     │   ├── analyzer.ts      # Audit orchestration, 20 check builders
+    │   ├── classifier.ts    # V3 site-profile classifier and confidence scoring
     │   ├── content.ts       # Content scope, SNR, headings, source lines
     │   ├── directives.ts    # X-Robots-Tag and robots meta evaluation
     │   ├── fetch-page.ts    # SSRF-safe fetcher with response headers
@@ -289,13 +341,14 @@ Because nothing is rendered in a browser, the audit reports what is **in the ini
     │   ├── security.ts      # URL validation & DNS checks
     │   ├── score.ts         # Weighting and grades
     │   ├── samples.ts       # Functional standard presets
+    │   ├── site-types.ts    # Six profile definitions and helpers
     │   └── rate-limit.ts    # Per-IP audit budget
     └── types/audit.ts       # Shared audit types, evidence and fixes
 ```
 
 ## Testing
 
-`pnpm test` runs the Vitest suite over the pure helpers — RFC 9309 parsing and agent decisions with source lines, sitemap parsing and index expansion, SSRF validation, scoring, `llms.txt` validation, directive evaluation and the content model (scope selection, chrome removal, heading lines, SNR) — on fixtures, with no network access.
+`pnpm test` runs the Vitest suite over the pure helpers — RFC 9309 parsing and agent decisions with source lines, sitemap parsing and index expansion, SSRF validation, scoring, `llms.txt` validation, directive evaluation, site classification, and the content model (scope selection, chrome removal, heading lines, SNR) — on fixtures, with no network access.
 
 Live audits are not part of the suite. To check the engine against real sites, run `pnpm start` and request `/api/audit?url=…`, or use the standard presets in the workspace.
 

@@ -1,8 +1,14 @@
 # LLMReady
 
-> An open-source spec-compliance auditor for AI discovery. It validates /llms.txt, RFC 9309 robots.txt policy, static HTML signal-to-noise and schema.org metadata, then returns the exact source line and a copy-paste fix for every miss.
+> An open-source AI compatibility auditor. It classifies a site into one of six profiles, then validates /llms.txt, RFC 9309 robots.txt policy, static HTML signal-to-noise and the schema.org types that profile expects, returning the exact source line and a copy-paste fix for every miss.
 
 LLMReady runs against the initial HTML response. It does not execute JavaScript against the target and does not store audits in a database. The public instance is free, open source and has no signup.
+
+## The pipeline
+
+1. **Raw site.** Fetch the initial HTML, `/llms.txt`, `/robots.txt`, `/sitemap.xml`, `/openapi.json` and structured data without rendering.
+2. **Site classification.** Hostname, sitemap and navigation paths, JSON-LD types, `og:type`, title/description copy, markup shape and the `llms.txt` index vote for one of six profiles: `saas`, `portfolio`, `docs`, `ecommerce`, `local-business` or `blog-media`. The winning profile and its top signals are returned in `classification`.
+3. **Site AI compatibility.** The profile sets the expected schema types and whether OpenAPI is scored, then the four-pillar audit produces the score and fix queue. A manual override is available in the workspace or with `type=` on the API.
 
 ## What the audit measures
 
@@ -28,8 +34,8 @@ Content is read from `main`, else `[role="main"]`, else the richest `article`, e
 ### Structured data
 
 - JSON-LD blocks are parsed and checked for `@context` and `@type`.
-- The audit looks for one of `TechArticle`, `FAQPage` or `SoftwareApplication`.
-- `/openapi.json`, `/.well-known/openapi.json` and `/openapi.yaml` are probed for OpenAPI documents.
+- The audit looks for one of the profile's expected types: `SoftwareApplication` for SaaS, `Person` for portfolios, `TechArticle` for docs, `Product` for e-commerce, `LocalBusiness` for local businesses and `Article` or `NewsArticle` for media.
+- `/openapi.json`, `/.well-known/openapi.json` and `/openapi.yaml` are probed for OpenAPI documents. OpenAPI is scored for SaaS and docs profiles only.
 - `/.well-known/security.txt` and `/.well-known/ai-plugin.json` are checked as optional discovery surfaces.
 
 ## Scoring
@@ -38,19 +44,20 @@ Each check returns pass, warn or fail, worth 100, 50 or 0 points. A pillar score
 
 ## Workspace
 
-The audit matrix shows every check with its protocol, source file, exact line number, a short observation and an expandable code fix. The `llms.txt` editor builds both the manifest and the full bundle from the pages discovered during the audit, validates the result and offers copy and download actions. The scraper simulator shows the raw HTML beside the cleaned markdown a non-JS crawler would ingest, with payload reduction and token estimates.
+The audit matrix shows the detected site profile, confidence and signals above every tab. Changing the override re-runs the audit against that profile. The matrix itself shows every check with its protocol, source file, exact line number, a short observation and an expandable code fix. The `llms.txt` editor builds both the manifest and the full bundle from the pages discovered during the audit, validates the result and offers copy and download actions. The scraper simulator shows the raw HTML beside the cleaned markdown a non-JS crawler would ingest, with payload reduction and token estimates.
 
 ## API
 
 `GET /api/audit?url=example.com` returns a JSON report with:
 
+- `classification` with the effective `type`, `confidence`, `method`, `detected` profile, top `signals` and `compatibility` rules.
 - `score`, `grade`, `gradeLabel` and four `pillars`.
 - Each check with `id`, `label`, `status`, `summary`, `detail`, `protocol`, `weight`, `evidence` and an optional `fix`.
 - `evidence.file`, `evidence.line` and `evidence.snippet` for line-level evidence.
 - `fix.language` and `fix.code` for a copy-paste resolution.
 - `profile`, `pages`, `files`, `vision`, `fixes` and `meta`.
 
-A bare domain or a full URL is accepted. Errors use `{ "error": { "code", "message", "hint?" } }`. Identical URLs are cached for five minutes per server instance. The public rate limit is 30 audits per minute per IP.
+A bare domain or a full URL is accepted. Add `type=docs` (or `saas`, `portfolio`, `ecommerce`, `local-business`, `blog-media`) to pin the profile. Errors use `{ "error": { "code", "message", "hint?" } }`. Identical URLs are cached for five minutes per server instance, separately for each profile. The public rate limit is 30 audits per minute per IP.
 
 ## Standards and source
 
