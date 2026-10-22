@@ -37,7 +37,7 @@ A terminal hero with a quick audit bar. Below it, a **three-step pipeline** show
 
 ### Workspace — `/app`
 
-Above the tabs, the **site classification panel** shows the detected profile, confidence, the signals behind it and the compatibility rules it applies. The profile select re-runs the audit with a `type` parameter, so an override is shareable and cached separately from the automatic result.
+Above the tabs, the **site classification panel** shows the detected profile, confidence, the signals behind it and the compatibility rules it applies. When automatic confidence falls below 30%, the profile title is flagged and every option is shown with its own compact confidence bar. The profile select re-runs the audit with a `type` parameter, so an override is shareable and cached separately from the automatic result.
 
 | Tab                   | What it does                                                                                                                                                                                                             |
 | :-------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -294,6 +294,11 @@ GET /api/audit?url=example.com&type=docs
     "confidence": 86,
     "method": "heuristic",
     "detected": { "type": "docs", "label": "Documentation", "confidence": 86 },
+    "alternatives": [
+      { "type": "docs", "label": "Documentation", "confidence": 86 },
+      { "type": "saas", "label": "SaaS / product", "confidence": 12 },
+      // …the other four profiles, ranked by automatic support
+    ],
     "signals": [
       {
         "type": "docs",

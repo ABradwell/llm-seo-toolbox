@@ -338,7 +338,16 @@
       },
       "SiteClassification": {
         "type": "object",
-        "required": ["type", "label", "confidence", "method", "detected", "signals", "compatibility"],
+        "required": [
+          "type",
+          "label",
+          "confidence",
+          "method",
+          "detected",
+          "alternatives",
+          "signals",
+          "compatibility"
+        ],
         "properties": {
           "type": {
             "$ref": "#/components/schemas/SiteType"
@@ -369,6 +378,27 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 100
+              }
+            }
+          },
+          "alternatives": {
+            "type": "array",
+            "description": "Every profile ranked by automatic support, highest first. The detected profile is first and carries the headline confidence.",
+            "items": {
+              "type": "object",
+              "required": ["type", "label", "confidence"],
+              "properties": {
+                "type": {
+                  "$ref": "#/components/schemas/SiteType"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "confidence": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100
+                }
               }
             }
           },

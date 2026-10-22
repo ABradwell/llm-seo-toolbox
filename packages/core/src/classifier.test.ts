@@ -35,6 +35,14 @@ describe("classifySite", () => {
     expect(result.type).toBe("docs");
     expect(result.label).toBe("Documentation");
     expect(result.confidence).toBeGreaterThanOrEqual(70);
+    expect(result.alternatives).toHaveLength(6);
+    expect(result.alternatives[0]).toMatchObject({
+      type: "docs",
+      confidence: result.confidence,
+    });
+    expect(result.alternatives.every((option) => option.confidence <= result.confidence)).toBe(
+      true,
+    );
     expect(result.signals.some((signal) => signal.label.includes("TechArticle"))).toBe(true);
   });
 
@@ -130,6 +138,10 @@ describe("classifySite", () => {
     expect(result.confidence).toBe(100);
     expect(result.detected.type).toBe("docs");
     expect(result.detected.confidence).toBeGreaterThan(0);
+    expect(result.alternatives[0]).toMatchObject({
+      type: "docs",
+      confidence: result.detected.confidence,
+    });
     expect(result.compatibility.openApiScored).toBe(true);
     expect(result.signals.some((signal) => signal.type === "docs")).toBe(true);
   });
@@ -140,6 +152,16 @@ describe("classifySite", () => {
     expect(result.type).toBe("saas");
     expect(result.method).toBe("heuristic");
     expect(result.confidence).toBe(15);
+    expect(result.alternatives).toHaveLength(6);
+    expect(result.alternatives.every((option) => option.confidence === 15)).toBe(true);
+    expect(result.alternatives.map((option) => option.type)).toEqual([
+      "saas",
+      "portfolio",
+      "docs",
+      "ecommerce",
+      "local-business",
+      "blog-media",
+    ]);
     expect(result.signals[0]?.source).toBe("fallback");
   });
 });
