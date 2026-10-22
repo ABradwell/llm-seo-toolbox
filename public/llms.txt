@@ -9,6 +9,12 @@
 - [Live specification checklist](https://github.com/ABradwell/llm-seo-toolbox#scoring-model): The checks the audit enforces, with pass conditions.
 - [API](https://github.com/ABradwell/llm-seo-toolbox#api): `GET /api/audit?url=example.com` returns the full JSON report, including `classification`.
 
+## Developer tools
+
+- [CLI](https://github.com/ABradwell/llm-seo-toolbox#cli): `llm-seo-toolbox example.com` runs the same audit with table, JSON, markdown or summary output and CI-friendly exit codes.
+- [GitHub Action](https://github.com/ABradwell/llm-seo-toolbox#github-action): Audit a deployment on every pull request, keep one sticky report comment current and fail the job below a score or grade threshold.
+- [Workspace packages](https://github.com/ABradwell/llm-seo-toolbox#workspace-layout): `@llm-seo-toolbox/core` is shared by the web app, CLI and action.
+
 ## Standards
 
 - [llms.txt specification](https://llmstxt.org/): The manifest structure this project validates.

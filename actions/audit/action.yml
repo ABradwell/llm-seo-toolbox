@@ -1,0 +1,49 @@
+name: "LLM SEO Toolbox Audit"
+description: "Audit a deployed site's /llms.txt, crawler access, static parseability and schema.org interfaces. Post a pull request report and fail the job when the score or grade misses its threshold."
+author: "ABradwell"
+branding:
+  icon: "search"
+  color: "purple"
+
+inputs:
+  url:
+    description: "Target URL to audit, e.g. https://preview.example.com"
+    required: true
+  min-score:
+    description: "Minimum composite score (0-100) required to pass"
+    required: false
+    default: "75"
+  min-grade:
+    description: "Minimum letter grade (A, B, C, D or F) required to pass"
+    required: false
+    default: "B"
+  site-type:
+    description: "Force a site profile: auto, saas, portfolio, docs, ecommerce, local-business or blog-media"
+    required: false
+    default: "auto"
+  comment-on-pr:
+    description: "Post or update a sticky audit report on the pull request"
+    required: false
+    default: "true"
+  github-token:
+    description: "Token used to write the pull request comment"
+    required: false
+    default: ${{ github.token }}
+  timeout:
+    description: "Per-request timeout in milliseconds"
+    required: false
+    default: "10000"
+
+outputs:
+  score:
+    description: "Composite AI compatibility score (0-100)"
+  grade:
+    description: "Composite letter grade (A-F)"
+  passed:
+    description: "Whether the score and grade met the configured thresholds"
+  report-json:
+    description: "JSON-serialized audit report"
+
+runs:
+  using: "node20"
+  main: "dist/index.cjs"

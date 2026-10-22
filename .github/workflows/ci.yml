@@ -27,6 +27,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build CLI and action bundles
+        run: pnpm build:packages
+
+      - name: Smoke-test the CLI
+        run: node packages/cli/dist/index.js --version
+
       - name: Check formatting
         run: pnpm format:check
 

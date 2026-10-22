@@ -19,6 +19,10 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:cli": "pnpm --filter @llm-seo-toolbox/cli build",
+    "build:action": "pnpm --filter @llm-seo-toolbox/action build",
+    "build:packages": "pnpm build:cli && pnpm build:action",
+    "cli": "node packages/cli/dist/index.js",
     "start": "next start",
     "lint": "eslint .",
     "format": "prettier --write .",
@@ -30,14 +34,13 @@
     "prepare": "husky"
   },
   "dependencies": {
+    "@llm-seo-toolbox/core": "workspace:*",
     "@radix-ui/react-slot": "^1.2.3",
     "@radix-ui/react-tabs": "^1.1.13",
-    "cheerio": "^1.1.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.545.0",
     "next": "16.4.2",
-    "node-html-markdown": "^2.0.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "tailwind-merge": "^3.3.1"

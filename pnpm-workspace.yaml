@@ -1,0 +1,6 @@
+packages:
+  - "packages/*"
+  - "actions/*"
+
+onlyBuiltDependencies:
+  - esbuild

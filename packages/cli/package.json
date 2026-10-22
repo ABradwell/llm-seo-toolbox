@@ -1,0 +1,38 @@
+{
+  "name": "@llm-seo-toolbox/cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Audit a website's AI discovery surface from the command line.",
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "bin": {
+    "llm-seo-toolbox": "./dist/index.js"
+  },
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20.9"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "cheerio": "^1.1.2",
+    "node-html-markdown": "^2.0.0"
+  },
+  "devDependencies": {
+    "@llm-seo-toolbox/core": "workspace:*",
+    "tsup": "^9.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ABradwell/llm-seo-toolbox.git",
+    "directory": "packages/cli"
+  }
+}

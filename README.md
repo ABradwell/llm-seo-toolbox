@@ -60,16 +60,20 @@ Requirements: **Node 20.9+** (CI uses Node 22) and **pnpm 10+**.
 
 ### Scripts
 
-| Script             | Purpose                                         |
-| :----------------- | :---------------------------------------------- |
-| `pnpm dev`         | Start the development server on port 3000.      |
-| `pnpm build`       | Production build.                               |
-| `pnpm start`       | Serve the production build.                     |
-| `pnpm lint`        | ESLint over the whole project.                  |
-| `pnpm format`      | Prettier write (`format:check` to verify only). |
-| `pnpm screenshots` | Capture desktop/mobile app screenshots.         |
-| `pnpm typecheck`   | `tsc --noEmit`.                                 |
-| `pnpm test`        | Vitest unit suite (`test:watch` to iterate).    |
+| Script                | Purpose                                             |
+| :-------------------- | :-------------------------------------------------- |
+| `pnpm dev`            | Start the development server on port 3000.          |
+| `pnpm build`          | Production build.                                   |
+| `pnpm start`          | Serve the production build.                         |
+| `pnpm build:cli`      | Bundle the `@llm-seo-toolbox/cli` executable.       |
+| `pnpm build:action`   | Bundle the GitHub Action into `actions/audit/dist`. |
+| `pnpm build:packages` | Build the CLI and the GitHub Action.                |
+| `pnpm cli`            | Run the built CLI (`pnpm cli example.com`).         |
+| `pnpm lint`           | ESLint over the whole project.                      |
+| `pnpm format`         | Prettier write (`format:check` to verify only).     |
+| `pnpm screenshots`    | Capture desktop/mobile app screenshots.             |
+| `pnpm typecheck`      | `tsc --noEmit`.                                     |
+| `pnpm test`           | Vitest unit suite (`test:watch` to iterate).        |
 
 ### Configuration
 
@@ -82,6 +86,109 @@ All variables are optional; the app works out of the box.
 | `NEXT_PUBLIC_BMC_URL`    | `https://www.buymeacoffee.com`                      | Buy Me a Coffee links in the header and footer.   |
 
 Copy [`.env.example`](.env.example) to `.env.local` to override them.
+
+## CLI
+
+The audit engine is packaged as a small executable so the same checks run in a
+terminal, a script or CI. It shares `@llm-seo-toolbox/core` with the web
+workspace and the GitHub Action.
+
+```bash
+pnpm install
+pnpm build:cli
+
+# Run the bundled CLI
+pnpm cli example.com
+
+# Equivalent, without the root script
+node packages/cli/dist/index.js example.com --format json
+```
+
+| Flag                   | Short | Default         | Description                                                                                       |
+| :--------------------- | :---- | :-------------- | :------------------------------------------------------------------------------------------------ |
+| `--format <type>`      | `-f`  | `table`         | `table`, `json`, `markdown` or `summary`                                                          |
+| `--min-score <number>` | `-s`  | `0`             | Composite score required to pass (0–100)                                                          |
+| `--min-grade <grade>`  | `-g`  | `F`             | Letter grade required to pass (`A`, `B`, `C`, `D`, `F`)                                           |
+| `--site-type <type>`   | `-t`  | `auto`          | Force a profile: `auto`, `saas`, `portfolio`, `docs`, `ecommerce`, `local-business`, `blog-media` |
+| `--config <path>`      | `-c`  | auto-discovered | Configuration file to load                                                                        |
+| `--output <file>`      | `-o`  | stdout          | Write the report to a file                                                                        |
+| `--timeout <ms>`       |       | `10000`         | Per-request timeout                                                                               |
+| `--user-agent <ua>`    |       | toolbox default | Override the crawler user agent                                                                   |
+| `--verbose`            | `-v`  | `false`         | Log progress and timing to stderr                                                                 |
+| `--no-color`           |       | TTY-dependent   | Disable ANSI colour (also honours `NO_COLOR`)                                                     |
+
+Exit codes: **0** threshold met, **1** audit completed below a threshold, **2**
+the audit could not run (bad arguments, unreachable host, timeout).
+
+### Configuration file
+
+The CLI looks for `llm-seo-toolbox.config.json`, `.llmseotoolboxrc` and
+`.llmseotoolboxrc.json` in the working directory, in that order. CLI flags
+override file values. Copy [`.llmseotoolboxrc.example`](.llmseotoolboxrc.example)
+to get started.
+
+```json
+{
+  "format": "summary",
+  "minScore": 75,
+  "minGrade": "B",
+  "siteType": "auto",
+  "timeout": 10000
+}
+```
+
+## GitHub Action
+
+[`actions/audit`](actions/audit/action.yml) wraps the same engine. It audits the
+target URL, writes the report to the job summary, posts or updates one sticky
+pull request comment, and fails the job when the score or grade misses its
+threshold.
+
+```yaml
+- name: Build the audit action
+  run: pnpm install --frozen-lockfile && pnpm build:action
+
+- name: Audit the production deployment
+  uses: ./actions/audit
+  with:
+    url: https://example.com
+    min-score: "80"
+    min-grade: "B"
+    comment-on-pr: "true"
+    github-token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+| Input           | Default               | Description                                      |
+| :-------------- | :-------------------- | :----------------------------------------------- |
+| `url`           | required              | Target URL to audit                              |
+| `min-score`     | `75`                  | Minimum composite score required to pass         |
+| `min-grade`     | `B`                   | Minimum letter grade required to pass            |
+| `site-type`     | `auto`                | Force a profile or keep automatic classification |
+| `comment-on-pr` | `true`                | Create or update the sticky pull request comment |
+| `github-token`  | `${{ github.token }}` | Token used to write the comment                  |
+| `timeout`       | `10000`               | Per-request timeout in milliseconds              |
+
+Outputs: `score`, `grade`, `passed` and `report-json`.
+
+The repository dogfoods the action in
+[`.github/workflows/llm-seo-toolbox-audit.yml`](.github/workflows/llm-seo-toolbox-audit.yml).
+The audited URL defaults to `https://llm-seo-toolbox.vercel.app` and can be
+overridden with the `LLM_SEO_TOOLBOX_AUDIT_URL` repository variable.
+
+Pull requests from forks receive a read-only token, so the comment step logs a
+warning and the audit still runs.
+
+## Workspace layout
+
+The auditing engine lives in packages so the web app, CLI and action all run the
+same code.
+
+| Path            | What it is                                                          |
+| :-------------- | :------------------------------------------------------------------ |
+| `packages/core` | Classifier, four-pillar analyzer, scoring and report serialization. |
+| `packages/cli`  | `llm-seo-toolbox` command-line wrapper built with tsup.             |
+| `actions/audit` | GitHub Action wrapper with threshold gating and PR comments.        |
+| `src/lib`       | Thin re-exports the Next.js workspace consumes.                     |
 
 ## Site classification
 

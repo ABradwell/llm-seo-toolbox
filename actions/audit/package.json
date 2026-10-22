@@ -1,0 +1,21 @@
+{
+  "name": "@llm-seo-toolbox/action",
+  "version": "0.1.0",
+  "private": true,
+  "description": "GitHub Action that audits a deployed site and gates pull requests on its AI discovery score.",
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch"
+  },
+  "devDependencies": {
+    "@llm-seo-toolbox/core": "workspace:*",
+    "tsup": "^9.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ABradwell/llm-seo-toolbox.git",
+    "directory": "actions/audit"
+  }
+}
