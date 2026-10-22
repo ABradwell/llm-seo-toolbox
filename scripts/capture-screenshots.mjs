@@ -346,11 +346,13 @@ async function main() {
 
       if (job.scrollTo) {
         await send("Runtime.evaluate", {
-          expression: `document.querySelector(${JSON.stringify(job.scrollTo)})?.scrollIntoView({ block: "start" })`,
+          expression: `document.querySelector(${JSON.stringify(job.scrollTo)})?.scrollIntoView({ block: "start", behavior: "instant" })`,
         });
         await sleep(500);
       } else {
-        await send("Runtime.evaluate", { expression: "window.scrollTo(0, 0)" });
+        await send("Runtime.evaluate", {
+          expression: "window.scrollTo({ top: 0, behavior: 'instant' })",
+        });
         await sleep(150);
       }
 
