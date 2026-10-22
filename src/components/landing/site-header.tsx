@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { siteConfig } from "@/lib/site";
 
 const NAV = [
-  { href: "#checklist", label: "checklist" },
+  { href: "#cli", label: "cli" },
+  { href: "#action", label: "action" },
   { href: siteConfig.llmsTxtSpec, label: "llms.txt", external: true },
   { href: siteConfig.rfc9309, label: "rfc 9309", external: true },
   { href: siteConfig.github, label: "github", external: true },

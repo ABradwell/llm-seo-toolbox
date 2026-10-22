@@ -33,7 +33,7 @@ No accounts, no database, no JavaScript execution against the target site.
 
 ### Landing page — `/`
 
-A terminal hero with a quick audit bar. Below it, a **three-step pipeline** shows how the raw site becomes a site classification and then a profile-specific AI compatibility score. Next, a **live specification checklist** runs the real `/api/audit` engine against a selected preset (`Next.js`, `Python Docs`, `Stripe API`, `Tailwind CSS`) and resolves the Discovery, Access and Structure rows in place — no mocked screenshots. The page closes with the crawler reference strip, GitHub, Vercel deploy and Buy Me a Coffee links.
+A terminal hero with a quick audit bar. Below it, a **three-step pipeline** shows how the raw site becomes a site classification and then a profile-specific AI compatibility score. Next, the crawler reference strip is followed by the **CLI and GitHub Action** sections, which give copyable install and usage instructions for the terminal and the pull-request gate. The page closes with GitHub, Vercel deploy and Buy Me a Coffee links.
 
 ### Workspace — `/app`
 
@@ -444,13 +444,13 @@ Because nothing is rendered in a browser, the audit reports what is **in the ini
 ├── public/                  # Static assets
 └── src/
     ├── app/
-    │   ├── page.tsx         # Landing: terminal hero, pipeline diagram, live checklist
+    │   ├── page.tsx         # Landing: terminal hero, pipeline, CLI + action install
     │   ├── app/page.tsx     # Workspace shell
     │   ├── api/audit/       # Analysis endpoint
     │   ├── layout.tsx
     │   └── globals.css      # Tailwind v4 zinc theme, 4px radius scale
     ├── components/
-    │   ├── landing/         # Terminal hero, pipeline diagram, live checklist, header/footer
+    │   ├── landing/         # Terminal hero, pipeline, CLI + action install, header/footer
     │   ├── workspace/       # Classification panel, audit matrix, llms.txt editor, simulator
     │   └── ui/              # Low-radius shadcn-style primitives
     ├── lib/

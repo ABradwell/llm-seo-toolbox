@@ -6,7 +6,7 @@
 
 - [Audit workspace](https://github.com/ABradwell/llm-seo-toolbox#readme): Classify a site, run the 20-check audit matrix and inspect line-level fixes.
 - [Site classification](https://github.com/ABradwell/llm-seo-toolbox#site-classification): The six profiles and the signals behind them, with manual override.
-- [Live specification checklist](https://github.com/ABradwell/llm-seo-toolbox#scoring-model): The checks the audit enforces, with pass conditions.
+- [Scoring model](https://github.com/ABradwell/llm-seo-toolbox#scoring-model): The checks the audit enforces, with pass conditions.
 - [API](https://github.com/ABradwell/llm-seo-toolbox#api): `GET /api/audit?url=example.com` returns the full JSON report, including `classification`.
 
 ## Developer tools

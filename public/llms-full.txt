@@ -63,9 +63,10 @@ A bare domain or a full URL is accepted. Add `type=docs` (or `saas`, `portfolio`
 
 The same audit engine is packaged for terminals and CI, so a local run and a pull request check return the same score and fixes.
 
+- Install: clone the repository, run `pnpm install` and `pnpm build:cli`, then run `pnpm cli example.com` from the repository root. The bundle also runs directly with `node packages/cli/dist/index.js`.
 - CLI: `llm-seo-toolbox example.com --min-score 75 --min-grade B`. Formats are `table` (default), `json`, `markdown` and `summary`; `--output` writes to a file. Exit code 0 means the threshold passed, 1 means the audit completed below a threshold and 2 means the audit could not run.
 - Configuration: the CLI discovers `llm-seo-toolbox.config.json`, `.llmseotoolboxrc` or `.llmseotoolboxrc.json` in the working directory. CLI flags override file values.
-- GitHub Action: `actions/audit` audits the target URL, writes the report to the job summary, creates or updates one sticky pull request comment and fails the job when the configured score or grade is missed. Inputs are `url`, `min-score`, `min-grade`, `site-type`, `comment-on-pr`, `github-token` and `timeout`; outputs are `score`, `grade`, `passed` and `report-json`.
+- GitHub Action: build the bundle with `pnpm build:action`, then use `./actions/audit` in the workflow. The action audits the target URL, writes the report to the job summary, creates or updates one sticky pull request comment and fails the job when the configured score or grade is missed. Inputs are `url`, `min-score`, `min-grade`, `site-type`, `comment-on-pr`, `github-token` and `timeout`; outputs are `score`, `grade`, `passed` and `report-json`.
 - Packages: `@llm-seo-toolbox/core` contains the classifier, four-pillar analyzer, scoring and report renderers. The Next.js workspace, `@llm-seo-toolbox/cli` and `@llm-seo-toolbox/action` all consume it.
 
 ## Standards and source

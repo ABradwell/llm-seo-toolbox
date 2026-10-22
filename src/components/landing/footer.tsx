@@ -12,7 +12,8 @@ const COLUMNS: {
     label: "Product",
     links: [
       { label: "Audit workspace", href: "/app" },
-      { label: "Live checklist", href: "/#checklist" },
+      { label: "CLI", href: "/#cli" },
+      { label: "GitHub Action", href: "/#action" },
       { label: "API", href: "/api/audit?url=example.com" },
     ],
   },

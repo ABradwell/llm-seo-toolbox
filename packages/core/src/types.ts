@@ -86,7 +86,7 @@ export interface CheckFix {
 }
 
 export interface AuditCheck {
-  /** Stable identifier, used for keys, tests and the live landing checklist. */
+  /** Stable identifier, used for keys, tests and the audit matrix. */
   id: string;
   label: string;
   status: CheckStatus;
