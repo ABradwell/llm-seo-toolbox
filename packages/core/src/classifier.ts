@@ -438,6 +438,16 @@ export function classifySite(
   const detected = ranked[0];
   const runnerUp = ranked[1];
   const detectedConfidence = confidenceFor(detected.score, runnerUp.score);
+  // With no signals every profile shares the fallback confidence, so the
+  // breakdown shows a genuine tie instead of pinning evidence on the default.
+  const alternatives = ranked.map(({ type, score }) => ({
+    type,
+    label: siteTypeById(type).label,
+    confidence:
+      detected.score === 0
+        ? detectedConfidence
+        : Math.round((score / detected.score) * detectedConfidence),
+  }));
 
   if (detected.score === 0) {
     signals.push({
@@ -468,6 +478,7 @@ export function classifySite(
       label: siteTypeById(detected.type).label,
       confidence: detectedConfidence,
     },
+    alternatives,
     signals:
       topSignals.length > 0
         ? topSignals

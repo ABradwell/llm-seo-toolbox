@@ -24,6 +24,13 @@ export interface ClassificationSignal {
   source: ClassificationSignalSource;
 }
 
+export interface SiteClassificationAlternative {
+  type: SiteType;
+  label: string;
+  /** 0–100. The winning profile carries the headline confidence. */
+  confidence: number;
+}
+
 export interface SiteClassification {
   /** The profile the audit actually uses. */
   type: SiteType;
@@ -37,6 +44,11 @@ export interface SiteClassification {
     label: string;
     confidence: number;
   };
+  /**
+   * Every profile ranked by automatic support, highest first. The detected
+   * profile is first and its confidence matches the headline value.
+   */
+  alternatives: SiteClassificationAlternative[];
   /** Top signals behind the automatic decision. */
   signals: ClassificationSignal[];
   /** What the profile changes inside the audit. */

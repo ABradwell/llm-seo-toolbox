@@ -50,7 +50,7 @@ The audit matrix shows the detected site profile, confidence and signals above e
 
 `GET /api/audit?url=example.com` returns a JSON report with:
 
-- `classification` with the effective `type`, `confidence`, `method`, `detected` profile, top `signals` and `compatibility` rules.
+- `classification` with the effective `type`, `confidence`, `method`, `detected` profile, `alternatives` ranked by support, top `signals` and `compatibility` rules.
 - `score`, `grade`, `gradeLabel` and four `pillars`.
 - Each check with `id`, `label`, `status`, `summary`, `detail`, `protocol`, `weight`, `evidence` and an optional `fix`.
 - `evidence.file`, `evidence.line` and `evidence.snippet` for line-level evidence.

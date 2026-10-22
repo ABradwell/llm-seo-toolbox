@@ -65,6 +65,18 @@ export function auditFixture(): AuditResult {
       confidence: 77,
       method: "heuristic",
       detected: { type: "saas", label: siteTypeById("saas").label, confidence: 77 },
+      alternatives: [
+        { type: "saas", label: siteTypeById("saas").label, confidence: 77 },
+        { type: "portfolio", label: siteTypeById("portfolio").label, confidence: 0 },
+        { type: "docs", label: siteTypeById("docs").label, confidence: 0 },
+        { type: "ecommerce", label: siteTypeById("ecommerce").label, confidence: 0 },
+        {
+          type: "local-business",
+          label: siteTypeById("local-business").label,
+          confidence: 0,
+        },
+        { type: "blog-media", label: siteTypeById("blog-media").label, confidence: 0 },
+      ],
       signals: [
         {
           type: "saas",
