@@ -89,30 +89,41 @@ export const PIPELINE_PHASES: readonly PipelinePhase[] = [
       {
         id: "validate-url",
         label: "Validating URL",
-        ms: 500,
+        ms: 400,
         result: (audit) => `${protocolOf(audit.finalUrl)} · ${audit.domain}`,
       },
       {
         id: "fetch-home",
         label: "Fetching homepage HTML",
-        ms: 700,
+        ms: 500,
         result: (audit) => `${formatBytes(audit.vision.htmlBytes)} HTML`,
       },
       {
         id: "fetch-discovery",
         label: "Requesting robots.txt, llms.txt, llms-full.txt",
-        ms: 650,
+        ms: 550,
         result: discoveryResult,
       },
       {
         id: "read-sitemap",
         label: "Reading sitemap.xml",
-        ms: 550,
+        ms: 450,
         result: (audit) => {
           const sitemap = audit.files.find((file) => file.id === "sitemap");
           if (!sitemap?.found) return "not found";
-          const sampled = audit.pages.filter((page) => page.source === "sitemap").length;
-          return `${formatNumber(sampled)} URLs sampled`;
+          const listed = audit.pages.filter((page) => page.source === "sitemap").length;
+          return `${formatNumber(listed)} URLs listed`;
+        },
+      },
+      {
+        id: "sample-pages",
+        label: "Sampling pages for the site score",
+        ms: 500,
+        result: (audit) => {
+          if (audit.coverage.method === "page") return "page scope";
+          return `${formatNumber(audit.coverage.analyzedPages)} of ${formatNumber(
+            audit.coverage.sampleSize,
+          )} pages analyzed`;
         },
       },
     ],
@@ -206,6 +217,7 @@ const ERROR_STEPS: Record<string, string> = {
   missing_url: "validate-url",
   invalid_url: "validate-url",
   invalid_site_type: "validate-url",
+  invalid_scope: "validate-url",
   blocked_url: "validate-url",
   fetch_failed: "fetch-home",
   http_error: "fetch-home",

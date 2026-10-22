@@ -22,19 +22,22 @@ export interface RateLimitResult {
   retryAfterSeconds: number;
 }
 
-export function rateLimit(key: string): RateLimitResult {
+/**
+ * A site audit costs more than a page audit because it fetches and analyzes
+ * a sample of pages. The bucket is shared so the weighted total is bounded.
+ */
+export function rateLimit(key: string, cost = 1): RateLimitResult {
   const now = Date.now();
+  const amount = Math.max(1, Math.floor(cost));
   sweep(now);
 
   const bucket = buckets.get(key);
   if (!bucket || bucket.reset < now) {
-    buckets.set(key, { count: 1, reset: now + WINDOW_MS });
-    return { ok: true, remaining: LIMIT - 1, retryAfterSeconds: 0 };
+    buckets.set(key, { count: amount, reset: now + WINDOW_MS });
+    return { ok: true, remaining: Math.max(0, LIMIT - amount), retryAfterSeconds: 0 };
   }
 
-  bucket.count += 1;
-
-  if (bucket.count > LIMIT) {
+  if (bucket.count + amount > LIMIT) {
     return {
       ok: false,
       remaining: 0,
@@ -42,5 +45,6 @@ export function rateLimit(key: string): RateLimitResult {
     };
   }
 
+  bucket.count += amount;
   return { ok: true, remaining: LIMIT - bucket.count, retryAfterSeconds: 0 };
 }

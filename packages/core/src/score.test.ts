@@ -3,14 +3,16 @@ import { describe, expect, it } from "vitest";
 import { gradeFor, scoreAudit, scorePillar, statusScore } from "./score";
 import type { AuditCheck } from "./types";
 
-function check(status: AuditCheck["status"], weight = 1): AuditCheck {
+function check(status: AuditCheck["status"], weight = 1, score?: number): AuditCheck {
   return {
-    id: `check-${status}-${weight}`,
+    id: `check-${status}-${weight}-${score ?? "auto"}`,
     label: "Check",
     status,
     summary: "",
     detail: "",
     weight,
+    scope: "site",
+    ...(score === undefined ? {} : { score }),
   };
 }
 
@@ -38,6 +40,14 @@ describe("scorePillar", () => {
 
   it("returns zero for empty pillars", () => {
     expect(scorePillar({ checks: [] })).toBe(0);
+  });
+
+  it("uses an aggregate score when one is present", () => {
+    expect(scorePillar({ checks: [check("warn", 1, 88)] })).toBe(88);
+  });
+
+  it("does not confuse a zero aggregate score with a missing score", () => {
+    expect(scorePillar({ checks: [check("warn", 1, 0)] })).toBe(0);
   });
 });
 

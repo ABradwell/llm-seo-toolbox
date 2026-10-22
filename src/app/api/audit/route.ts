@@ -1,7 +1,7 @@
 import { AuditError, analyzeSite } from "@/lib/analyzer";
 import { rateLimit } from "@/lib/rate-limit";
 import { SITE_TYPES, isSiteType } from "@/lib/site-types";
-import type { AuditApiError, SiteType } from "@/types/audit";
+import type { AuditApiError, AuditScope, SiteType } from "@/types/audit";
 
 export const maxDuration = 60;
 
@@ -11,26 +11,6 @@ function errorResponse(code: string, message: string, status: number, hint?: str
 }
 
 export async function GET(request: Request) {
-  const forwardedFor = request.headers.get("x-forwarded-for") ?? "";
-  const clientKey =
-    forwardedFor.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "local";
-
-  const limit = rateLimit(clientKey);
-  if (!limit.ok) {
-    return Response.json(
-      {
-        error: {
-          code: "rate_limited",
-          message: "Too many audits from this network. Give it a minute and try again.",
-        },
-      } satisfies AuditApiError,
-      {
-        status: 429,
-        headers: { "retry-after": String(limit.retryAfterSeconds) },
-      },
-    );
-  }
-
   const { searchParams } = new URL(request.url);
   const target = searchParams.get("url");
 
@@ -61,12 +41,45 @@ export async function GET(request: Request) {
     siteType = typeParam;
   }
 
+  const scopeParam = searchParams.get("scope")?.trim().toLowerCase() ?? null;
+  if (scopeParam && scopeParam !== "site" && scopeParam !== "page") {
+    return errorResponse(
+      "invalid_scope",
+      `Unknown audit scope “${scopeParam}”.`,
+      400,
+      "Use scope=site for an origin score, or scope=page for the V2 single-page audit.",
+    );
+  }
+  const scope: AuditScope = scopeParam === "page" ? "page" : "site";
+
+  const forwardedFor = request.headers.get("x-forwarded-for") ?? "";
+  const clientKey =
+    forwardedFor.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "local";
+
+  // A site audit fetches and analyzes a sample of pages, so it costs more.
+  const limit = rateLimit(clientKey, scope === "site" ? 3 : 1);
+  if (!limit.ok) {
+    return Response.json(
+      {
+        error: {
+          code: "rate_limited",
+          message: "Too many audits from this network. Give it a minute and try again.",
+        },
+      } satisfies AuditApiError,
+      {
+        status: 429,
+        headers: { "retry-after": String(limit.retryAfterSeconds) },
+      },
+    );
+  }
+
   try {
-    const audit = await analyzeSite(target, { siteType });
+    const audit = await analyzeSite(target, { siteType, scope });
     return Response.json(audit, {
       headers: {
         "cache-control": "no-store",
         "x-audit-cache": audit.meta.cached ? "hit" : "miss",
+        "x-audit-scope": audit.scope,
       },
     });
   } catch (error) {

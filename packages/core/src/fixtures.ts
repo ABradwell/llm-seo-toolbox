@@ -11,6 +11,7 @@ function check(id: string, status: CheckStatus, weight = 1): AuditCheck {
     detail: `${id} detail`,
     recommendation: status === "pass" ? undefined : `Fix ${id}.`,
     weight,
+    scope: "site",
   };
 }
 
@@ -51,8 +52,31 @@ const PILLARS: AuditPillar[] = [
 
 export function auditFixture(): AuditResult {
   const score = scoreAudit(PILLARS);
-  return {
+  const focusPage = {
     url: "https://example.com/",
+    finalUrl: "https://example.com/",
+    label: "Home",
+    section: "Home",
+    source: "home" as const,
+    outcome: "analyzed" as const,
+    status: "fail" as const,
+    score: 0,
+    grade: "F" as const,
+    checks: [],
+    title: "Example",
+    textChars: 90,
+    snr: 0.9,
+    h1Count: 0,
+    headingCount: 1,
+    jsonLdTypes: [],
+    metaRobots: "",
+    xRobotsTag: null,
+    fetchMs: 10,
+  };
+  return {
+    scope: "site",
+    url: "https://example.com/",
+    focusUrl: "https://example.com/",
     finalUrl: "https://example.com/",
     domain: "example.com",
     score,
@@ -102,6 +126,22 @@ export function auditFixture(): AuditResult {
       language: "en",
     },
     pages: [{ url: "https://example.com/", label: "Home", section: "Home", source: "home" }],
+    pageResults: [focusPage],
+    focusPage,
+    coverage: {
+      method: "sitemap",
+      inventorySize: 1,
+      listedPages: 1,
+      sampleSize: 1,
+      analyzedPages: 1,
+      failedPages: 0,
+      skippedPages: 0,
+      sitemapFound: true,
+      homepageFallback: false,
+      truncated: false,
+      deadlineHit: false,
+      note: "Analyzed 1 of 1 pages.",
+    },
     files: [
       {
         id: "llms-txt",
@@ -135,13 +175,20 @@ export function auditFixture(): AuditResult {
         status: "fail",
         summary: "h1 summary",
         recommendation: "Fix h1.",
+        weight: 1.5,
+        scope: "page",
       },
     ],
     meta: {
       fetchMs: 800,
       pageCount: 1,
+      discoveredPageCount: 1,
+      sampledPageCount: 1,
       crawledAt: "2026-10-21T12:00:00.000Z",
       cached: false,
+      siteCached: false,
+      focusCached: false,
+      scoringVersion: "site-1",
     },
   };
 }

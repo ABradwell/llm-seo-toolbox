@@ -1,13 +1,14 @@
 # LLMReady
 
-> An open-source AI compatibility auditor. Classify a site into one of six profiles, then validate /llms.txt, RFC 9309 robots.txt, static HTML signal-to-noise and profile-specific schema.org metadata.
+> An open-source AI compatibility auditor. Classify a site into one of six profiles, sample up to eight pages, then validate /llms.txt, RFC 9309 robots.txt, static HTML signal-to-noise and profile-specific schema.org metadata.
 
 ## Product
 
-- [Audit workspace](https://github.com/ABradwell/llm-seo-toolbox#readme): Classify a site, run the 20-check audit matrix and inspect line-level fixes.
+- [Audit workspace](https://github.com/ABradwell/llm-seo-toolbox#readme): Classify a site, run the 20-check audit matrix against a deterministic page sample and inspect line-level fixes.
+- [Site score vs page score](https://github.com/ABradwell/llm-seo-toolbox#site-score-vs-page-score): The origin-scoped score, deterministic sampling and the `scope=page` fallback.
 - [Site classification](https://github.com/ABradwell/llm-seo-toolbox#site-classification): The six profiles and the signals behind them, with manual override.
 - [Scoring model](https://github.com/ABradwell/llm-seo-toolbox#scoring-model): The checks the audit enforces, with pass conditions.
-- [API](https://github.com/ABradwell/llm-seo-toolbox#api): `GET /api/audit?url=example.com` returns the full JSON report, including `classification`.
+- [API](https://github.com/ABradwell/llm-seo-toolbox#api): `GET /api/audit?url=example.com` returns the full JSON report, including `classification`, `coverage` and `focusPage`.
 
 ## Developer tools
 

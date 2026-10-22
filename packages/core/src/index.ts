@@ -1,5 +1,7 @@
-export { analyzeSite, AuditError } from "./analyzer";
+export { analyzeSite, AuditError, clearAuditCache } from "./analyzer";
 export type { AnalyzeOptions } from "./analyzer";
+export { aggregatePageChecks, directPageChecks } from "./aggregate";
+export type { PageCheckGroups } from "./aggregate";
 export { classifySite } from "./classifier";
 export type { ClassificationInput, ClassificationOptions } from "./classifier";
 export { buildContentModel, SNR_PASS, SNR_WARN } from "./content";
@@ -55,8 +57,20 @@ export {
   statusScore,
 } from "./score";
 export { assertSafeUrl, isBlockedHostname, isPrivateIp, UnsafeUrlError } from "./security";
-export { isIndexablePage, looksLikeHtml, parseSitemap } from "./sitemap";
+export { isIndexablePage, isPageCandidate, looksLikeHtml, parseSitemap } from "./sitemap";
 export type { SitemapParseResult } from "./sitemap";
+export { analyzePage, extractJsonLd, extractMetaRobots, failedPage } from "./page-audit";
+export type { AnalyzePageInput, FailedPageInput, JsonLdReport } from "./page-audit";
+export {
+  buildInventory,
+  mapWithConcurrency,
+  MAX_INVENTORY_PAGES,
+  SAMPLE_CONCURRENCY,
+  SAMPLE_DEADLINE_MS,
+  selectSample,
+  SITE_SAMPLE_SIZE,
+} from "./sampling";
+export type { InventoryInput, PageInventory } from "./sampling";
 export { isSiteType, SITE_TYPES, siteTypeById } from "./site-types";
 export type { SiteTypeDefinition } from "./site-types";
 export type * from "./types";

@@ -71,7 +71,9 @@ export function LlmsTxtEditor({ audit }: { audit: AuditResult }) {
             </span>
             <div>
               <h3 className="font-mono text-[11px] tracking-[0.1em] uppercase">Manifest source</h3>
-              <p className="text-[10px] text-muted">Facts pulled from the audited page.</p>
+              <p className="text-[10px] text-muted">
+                Facts pulled from the site inventory and the focus page.
+              </p>
             </div>
           </div>
 
@@ -116,7 +118,8 @@ export function LlmsTxtEditor({ audit }: { audit: AuditResult }) {
             <Badge variant="default">{formatNumber(audit.pages.length)} pages</Badge>
           </div>
           <p className="mt-1 text-[10px] leading-relaxed text-muted">
-            Pages discovered through the sitemap and internal links, grouped by URL pattern.
+            Site inventory discovered through the sitemap and internal links, grouped by URL
+            pattern. The sample is a separate, smaller set used for scoring.
           </p>
 
           {sections.length === 0 ? (

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { PIPELINE_STEPS, PIPELINE_TOTAL_MS } from "./pipeline-steps";
+import { PIPELINE_PHASES, PIPELINE_STEPS, PIPELINE_TOTAL_MS } from "./pipeline-steps";
 import {
   CACHED_RATE,
   HOLD_AT_MS,
@@ -115,7 +115,11 @@ describe("pipeline timeline", () => {
       0,
     );
     const state = snapshot(runFor(collectMs + FRAME, inFlight));
-    expect(state.phases[0]).toMatchObject({ status: "done", fraction: 1, completedSteps: 4 });
+    expect(state.phases[0]).toMatchObject({
+      status: "done",
+      fraction: 1,
+      completedSteps: PIPELINE_PHASES[0].steps.length,
+    });
     expect(state.phases[1].status).toBe("active");
     expect(state.phases[1].fraction).toBeGreaterThan(0);
     expect(state.phases[1].fraction).toBeLessThan(1);

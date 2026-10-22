@@ -5,7 +5,15 @@ import type { AuditCheck, AuditPillar, AuditResult, DiscoveryFile } from "@/type
 import { PIPELINE_PHASES, PIPELINE_STEPS, PIPELINE_TOTAL_MS, stepForError } from "./pipeline-steps";
 
 function check(status: AuditCheck["status"]): AuditCheck {
-  return { id: `check-${status}`, label: status, status, summary: "", detail: "", weight: 1 };
+  return {
+    id: `check-${status}`,
+    label: status,
+    status,
+    summary: "",
+    detail: "",
+    weight: 1,
+    scope: "site",
+  };
 }
 
 function pillar(id: AuditPillar["id"], checks: AuditCheck[]): AuditPillar {
@@ -74,6 +82,20 @@ const audit = {
     { url: "", label: "", section: "", source: "home" },
   ],
   vision: { htmlBytes: 2_048 },
+  coverage: {
+    method: "sitemap",
+    inventorySize: 24,
+    listedPages: 3,
+    sampleSize: 8,
+    analyzedPages: 3,
+    failedPages: 0,
+    skippedPages: 16,
+    sitemapFound: true,
+    homepageFallback: false,
+    truncated: true,
+    deadlineHit: false,
+    note: "",
+  },
   meta: { cached: false },
 } as unknown as AuditResult;
 
@@ -90,8 +112,8 @@ describe("pipeline steps", () => {
       "Classifying site",
       "Analyzing LLM compatibility",
     ]);
-    expect(PIPELINE_STEPS).toHaveLength(13);
-    expect(new Set(PIPELINE_STEPS.map((step) => step.id)).size).toBe(13);
+    expect(PIPELINE_STEPS).toHaveLength(14);
+    expect(new Set(PIPELINE_STEPS.map((step) => step.id)).size).toBe(14);
     const last = PIPELINE_STEPS.at(-1)!;
     expect(PIPELINE_TOTAL_MS).toBe(7_000);
     expect(last.start + last.ms).toBe(PIPELINE_TOTAL_MS);
@@ -101,7 +123,8 @@ describe("pipeline steps", () => {
     expect(resultFor("validate-url")).toBe("https · example.com");
     expect(resultFor("fetch-home")).toBe("2.0 KB HTML");
     expect(resultFor("fetch-discovery")).toBe("2 of 3 found");
-    expect(resultFor("read-sitemap")).toBe("2 URLs sampled");
+    expect(resultFor("read-sitemap")).toBe("2 URLs listed");
+    expect(resultFor("sample-pages")).toBe("3 of 8 pages analyzed");
     expect(PIPELINE_PHASES[0].summary(audit)).toBe("3 of 6 files found");
   });
 
@@ -129,6 +152,7 @@ describe("pipeline steps", () => {
 
   it("maps API error codes to the step that owns them", () => {
     expect(stepForError("blocked_url")).toBe("validate-url");
+    expect(stepForError("invalid_scope")).toBe("validate-url");
     expect(stepForError("not_html")).toBe("fetch-home");
     expect(stepForError("rate_limited")).toBeNull();
     expect(stepForError(undefined)).toBeNull();

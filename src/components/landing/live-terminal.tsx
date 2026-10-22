@@ -6,15 +6,15 @@ interface TerminalLine {
 }
 
 const LINES: TerminalLine[] = [
-  { kind: "command", text: "$ pnpm cli https://nextjs.org/docs" },
+  { kind: "command", text: "$ pnpm cli https://nextjs.org/docs/app" },
   { kind: "pass", text: "GET /llms.txt            200  H1 + 142 markdown links" },
-  { kind: "pass", text: "GET /llms-full.txt       200  1.8 MB unpaginated bundle" },
   { kind: "pass", text: "GET /robots.txt          200  GPTBot allow · ClaudeBot allow" },
   { kind: "pass", text: "GET /sitemap.xml         200  1,204 URLs · robots directive L12" },
-  { kind: "pass", text: "GET / (initial HTML)      48 KB  SNR 71% · 12,840 chars" },
+  { kind: "pass", text: "GET / (site seed)        48 KB  SNR 71% · 12,840 chars" },
+  { kind: "info", text: "sample                   8 pages · 1,142 discovered · sitemap" },
   { kind: "info", text: "classify                 docs · 86% · TechArticle + 9 /docs paths" },
   { kind: "warn", text: "schema.org               TechArticle found · FAQPage missing" },
-  { kind: "info", text: "result                   18 pass · 2 warn · 0 fail  →  94 / A" },
+  { kind: "info", text: "result                   site 94 / A · focus /docs/app 88 / B" },
 ];
 
 export function LiveTerminal() {
@@ -29,9 +29,7 @@ export function LiveTerminal() {
           <span className="size-1.5 rounded-full bg-accent-light" aria-hidden="true" />
           reference run
         </div>
-        <span className="truncate font-mono text-[10px] text-code-muted/70">
-          v3 · classify + audit
-        </span>
+        <span className="truncate font-mono text-[10px] text-code-muted/70">v3 · site + focus</span>
       </div>
 
       <div className="relative min-h-[268px] scanlines p-4 font-mono text-[11.5px] leading-6 sm:text-[12px]">
@@ -66,7 +64,7 @@ export function LiveTerminal() {
 
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-code-foreground/10 bg-code-foreground/[0.03] px-3 py-2 font-mono text-[10px] text-code-muted">
         <span>llms.txt · RFC 9309 · schema.org</span>
-        <span className="text-pass-light">20 checks / 1 request</span>
+        <span className="text-pass-light">20 checks · 8-page sample</span>
       </div>
     </div>
   );
