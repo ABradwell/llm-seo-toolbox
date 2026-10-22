@@ -6,16 +6,25 @@
 
 Audit the four things that decide whether an AI crawler can find, read and classify your site: `/llms.txt`, RFC 9309 access rules, static HTML parseability and schema.org metadata. Before the checks run, LLMReady classifies the site into one of six profiles so the audit only scores what matters for that kind of site.
 
-[![CI](https://github.com/ABradwell/llm-seo-toolbox/actions/workflows/ci.yml/badge.svg)](https://github.com/ABradwell/llm-seo-toolbox/actions/workflows/ci.yml)
-[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0--only-blue.svg)](LICENSE)
-[![Next.js 16](https://img.shields.io/badge/Next.js-16-black.svg)](https://nextjs.org)
-[![pnpm](https://img.shields.io/badge/pnpm-10-orange.svg)](https://pnpm.io)
-[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/ABradwell/llm-seo-toolbox/pulls)
+[![CI](https://github.com/ABradwell/llm-seo-toolbox/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ABradwell/llm-seo-toolbox/actions/workflows/ci.yml) [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0--only-blue.svg)](LICENSE) [![Last commit](https://img.shields.io/github/last-commit/ABradwell/llm-seo-toolbox?logo=github&label=last%20commit)](https://github.com/ABradwell/llm-seo-toolbox/commits/main) [![Issues](https://img.shields.io/github/issues/ABradwell/llm-seo-toolbox?logo=github&label=issues)](https://github.com/ABradwell/llm-seo-toolbox/issues) [![Stars](https://img.shields.io/github/stars/ABradwell/llm-seo-toolbox?logo=github&label=stars)](https://github.com/ABradwell/llm-seo-toolbox/stargazers) [![Forks](https://img.shields.io/github/forks/ABradwell/llm-seo-toolbox?logo=github&label=forks)](https://github.com/ABradwell/llm-seo-toolbox/forks)
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FABradwell%2Fllm-seo-toolbox)
-[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-support%20the%20project-FFDD00?logo=buymeacoffee&logoColor=black)](https://www.buymeacoffee.com)
+[![Next.js 16](https://img.shields.io/badge/Next.js-16-black.svg)](https://nextjs.org) [![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev) [![TypeScript 5](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org) [![Node 20.9+](https://img.shields.io/badge/Node-20.9%2B-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org) [![pnpm 10](https://img.shields.io/badge/pnpm-10-orange.svg)](https://pnpm.io) [![Vitest](https://img.shields.io/badge/tested%20with-Vitest-6E9F18?logo=vitest&logoColor=white)](https://vitest.dev) [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/ABradwell/llm-seo-toolbox/pulls)
+
+[![Live demo](https://img.shields.io/badge/live%20demo-open%20app-0A7AFF?logo=vercel&logoColor=white)](https://llm-seo-toolbox.vercel.app) [![OpenAPI 3.1](https://img.shields.io/badge/OpenAPI-3.1-6BA539?logo=openapiinitiative&logoColor=white)](public/openapi.json) [![llms.txt](https://img.shields.io/badge/llms.txt-published-0A7AFF)](public/llms.txt)
+
+<p>
+  <a href="https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FABradwell%2Fllm-seo-toolbox"><img src="https://vercel.com/button" alt="Deploy with Vercel" height="32" /></a>
+  &nbsp;
+  <a href="https://buymeacoffee.com/bradwell"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" height="32" /></a>
+</p>
 
 </div>
+
+<p align="center">
+  <img src="screenshots/readme/home-desktop.png" alt="LLMReady landing page with the terminal hero, quick audit bar and a preview of the audit response" />
+  <br />
+  <sub>Landing page · terminal hero, three-step pipeline and a live specification checklist</sub>
+</p>
 
 ---
 
@@ -44,6 +53,35 @@ Above the tabs, the **site classification panel** shows the detected profile, co
 | **Audit matrix**      | Score and grade, per-pillar breakdown, every check with pass/warn/fail, the protocol it enforces, the source file and exact line number, a prioritized fix queue, discovery file table, and expandable code-level fixes. |
 | **`llms.txt` editor** | Edit the site name, summary and notes, choose discovered sections, then preview `llms.txt` or `llms-full.txt` with line numbers, live validation and copy/download actions.                                              |
 | **Scraper simulator** | Raw HTML beside the cleaned markdown a non-JS crawler would ingest, with payload reduction, token estimates, stripped-element counts and line numbers on both panes.                                                     |
+
+## Screenshots
+
+The workspace is the core of the app: classification, scoring and the fix queue on one page.
+
+![LLMReady audit workspace with site classification, score, pillar breakdown and prioritized fix queue](screenshots/readme/workspace-desktop.png)
+
+<table>
+  <tr>
+    <td width="50%">
+      <img src="screenshots/readme/workspace-desktop-override.png" alt="LLMReady workspace with a manually pinned portfolio profile" />
+    </td>
+    <td width="50%">
+      <img src="screenshots/readme/home-desktop-pipeline.png" alt="LLMReady three-step pipeline: raw site, site classification and AI compatibility" />
+    </td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Manual profile override</sub></td>
+    <td align="center"><sub>Landing page pipeline</sub></td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="screenshots/readme/home-mobile-pipeline.png" alt="LLMReady pipeline on a 390 pixel mobile viewport" width="300" />
+  &nbsp;&nbsp;
+  <img src="screenshots/readme/workspace-mobile.png" alt="LLMReady workspace on a 390 pixel mobile viewport" width="300" />
+  <br />
+  <sub>Mobile at 390 × 844 — pipeline and workspace.</sub>
+</p>
 
 ## Quick start
 
@@ -83,7 +121,7 @@ All variables are optional; the app works out of the box.
 | :----------------------- | :-------------------------------------------------- | :------------------------------------------------ |
 | `NEXT_PUBLIC_SITE_URL`   | Vercel production URL, else `http://localhost:3000` | Canonical metadata, sitemap and robots.txt URLs.  |
 | `NEXT_PUBLIC_GITHUB_URL` | `https://github.com/ABradwell/llm-seo-toolbox`      | Header, footer and landing page repository links. |
-| `NEXT_PUBLIC_BMC_URL`    | `https://www.buymeacoffee.com`                      | Buy Me a Coffee links in the header and footer.   |
+| `NEXT_PUBLIC_BMC_URL`    | `https://buymeacoffee.com/bradwell`                 | Buy Me a Coffee links in the header and footer.   |
 
 Copy [`.env.example`](.env.example) to `.env.local` to override them.
 
@@ -479,7 +517,9 @@ Live audits are not part of the suite. To check the engine against real sites, r
 
 ## Screenshot capture
 
-`pnpm screenshots --out "$TMPDIR/llm-ready-screenshots"` drives a locally installed Chrome through the DevTools Protocol. It captures the landing page and pipeline at 1440×900 and 390×844, then the workspace with automatic classification and a portfolio override. Start the app with `pnpm dev` first.
+The README images live in [`screenshots/readme/`](screenshots/readme). They were captured from a production build so the Next.js development indicator is not included.
+
+`pnpm screenshots --out "$TMPDIR/llm-ready-screenshots"` drives a locally installed Chrome through the DevTools Protocol. It captures the landing page and pipeline at 1440×900 and 390×844, then the workspace with automatic classification and a portfolio override. Run `pnpm build && pnpm start` first, then pass `--base-url` if the app is not on port 3000.
 
 Options: `--base-url`, `--out`, `--audit-url`, `--chrome` (or `CHROME_PATH`), `--scale` and `--config`. A custom config is a JSON array (or `{ "jobs": [...] }`) of jobs with `name`, `path`, `width`, `height`, `mobile`, `deviceScaleFactor`, `fullPage`, `scrollTo`, `waitForText`, `waitForSelector`, `settleMs` and `timeoutMs`.
 
@@ -505,10 +545,16 @@ Notes for production deployments:
 
 ## Support the project
 
+<p align="center">
+  <a href="https://buymeacoffee.com/bradwell">
+    <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" height="48" />
+  </a>
+</p>
+
 If LLMReady helped you get your site cited:
 
 - ⭐ Star the repository — it is the cheapest way to help others find it.
-- ☕ [Buy me a coffee](https://www.buymeacoffee.com) — the same link is wired into the app header and footer via `NEXT_PUBLIC_BMC_URL`.
+- ☕ [Buy me a coffee](https://buymeacoffee.com/bradwell) — the same link is wired into the app header and footer via `NEXT_PUBLIC_BMC_URL`.
 
 ## Contributing
 
