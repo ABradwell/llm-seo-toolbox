@@ -2,9 +2,9 @@
   "openapi": "3.1.0",
   "info": {
     "title": "LLMReady Audit API",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "summary": "Audit a site for LLM and AI crawler readiness.",
-    "description": "Fetches a site's initial HTML response plus its discovery files, classifies the site into one of six profiles, and returns a weighted four-pillar audit with line-level evidence and copy-paste fixes. Results are cached for five minutes per URL and profile; the public instance allows 30 audits per minute per IP.",
+    "description": "Fetches a site's initial HTML plus its discovery files, classifies the site, and returns a weighted four-pillar audit. Site scope (the default) samples up to eight pages and scores the origin; page scope scores the entered page. Results are cached for five minutes per server instance. The public instance allows 30 weighted credits per minute per IP: a site audit costs 3 and a page audit costs 1.",
     "license": {
       "name": "GPL-3.0-only",
       "identifier": "GPL-3.0-only"
@@ -31,9 +31,11 @@
     "/api/audit": {
       "get": {
         "operationId": "auditSite",
-        "summary": "Audit a site",
-        "description": "Runs the Discovery, Access, Parseability and Schema pillars against a URL. Supply a bare domain or an absolute URL; a missing scheme defaults to https://.",
-        "tags": ["Audit"],
+        "summary": "Audit a site or page",
+        "description": "Runs the Discovery, Access, Parseability and Schema pillars. Site scope (the default) builds a deterministic sample of up to eight pages from the origin, scores the site and returns the entered page as a focus-page drill-down. Page scope preserves the single-page audit. Supply a bare domain or an absolute URL; a missing scheme defaults to https://.",
+        "tags": [
+          "Audit"
+        ],
         "parameters": [
           {
             "name": "url",
@@ -62,6 +64,21 @@
                 "blog-media"
               ]
             }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "description": "site (default) scores the origin from a deterministic sample of up to eight pages. page preserves the single-page V2 audit and scores the entered page directly.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "site",
+                "page"
+              ],
+              "default": "site"
+            },
+            "example": "site"
           }
         ],
         "responses": {
@@ -73,10 +90,32 @@
                   "$ref": "#/components/schemas/AuditResult"
                 }
               }
+            },
+            "headers": {
+              "X-Audit-Cache": {
+                "description": "Whether the whole request was served from the in-memory cache.",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "hit",
+                    "miss"
+                  ]
+                }
+              },
+              "X-Audit-Scope": {
+                "description": "The effective audit scope.",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "site",
+                    "page"
+                  ]
+                }
+              }
             }
           },
           "400": {
-            "description": "Missing, invalid or blocked URL, or an unknown site type.",
+            "description": "Missing or invalid URL, unknown site type or scope, or a blocked URL.",
             "content": {
               "application/json": {
                 "schema": {
@@ -96,7 +135,7 @@
             }
           },
           "429": {
-            "description": "Rate limited. Wait for the number of seconds in the Retry-After header.",
+            "description": "Weighted rate limit exhausted. Wait for the number of seconds in the Retry-After header. Site audits cost 3 credits and page audits cost 1.",
             "headers": {
               "Retry-After": {
                 "description": "Seconds until another audit can be requested.",
@@ -155,16 +194,29 @@
           "pages",
           "files",
           "fixes",
-          "meta"
+          "meta",
+          "scope",
+          "focusUrl",
+          "pageResults",
+          "focusPage",
+          "coverage"
         ],
         "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "site",
+              "page"
+            ],
+            "description": "site scores the origin from a sample; page scores the entered page directly."
+          },
           "url": {
             "type": "string",
             "description": "The URL as requested."
           },
           "finalUrl": {
             "type": "string",
-            "description": "The URL that served the page after redirects."
+            "description": "The site root after redirects. For both scopes this is the origin-level anchor."
           },
           "domain": {
             "type": "string"
@@ -176,7 +228,13 @@
           },
           "grade": {
             "type": "string",
-            "enum": ["A", "B", "C", "D", "F"]
+            "enum": [
+              "A",
+              "B",
+              "C",
+              "D",
+              "F"
+            ]
           },
           "gradeLabel": {
             "type": "string",
@@ -198,7 +256,8 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/AuditPage"
-            }
+            },
+            "description": "Inventory for the llms.txt editor, capped at 80 URLs."
           },
           "files": {
             "type": "array",
@@ -208,7 +267,7 @@
           },
           "vision": {
             "type": "object",
-            "description": "Raw HTML and cleaned markdown previews with payload and token estimates.",
+            "description": "Raw HTML and cleaned markdown for the focus page, with payload and token estimates.",
             "additionalProperties": true
           },
           "fixes": {
@@ -219,13 +278,24 @@
           },
           "meta": {
             "type": "object",
-            "required": ["fetchMs", "pageCount", "crawledAt", "cached"],
+            "required": [
+              "fetchMs",
+              "pageCount",
+              "crawledAt",
+              "cached",
+              "discoveredPageCount",
+              "sampledPageCount",
+              "siteCached",
+              "focusCached",
+              "scoringVersion"
+            ],
             "properties": {
               "fetchMs": {
                 "type": "integer"
               },
               "pageCount": {
-                "type": "integer"
+                "type": "integer",
+                "description": "Kept for compatibility: the number of URLs in pages (the display cap)."
               },
               "crawledAt": {
                 "type": "string",
@@ -233,18 +303,72 @@
               },
               "cached": {
                 "type": "boolean"
+              },
+              "discoveredPageCount": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Every unique page-like URL found before the display cap."
+              },
+              "sampledPageCount": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Pages that produced page-level checks."
+              },
+              "siteCached": {
+                "type": "boolean",
+                "description": "Whether the origin base (classification, discovery, inventory and sample) came from cache."
+              },
+              "focusCached": {
+                "type": "boolean",
+                "description": "Whether the focus page drill-down came from cache."
+              },
+              "scoringVersion": {
+                "type": "string",
+                "enum": [
+                  "site-1"
+                ]
               }
             }
+          },
+          "focusUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "The page the user entered after redirects. It is a drill-down and only contributes to a site score when the sample already selected it."
+          },
+          "pageResults": {
+            "type": "array",
+            "description": "Pages whose page-level checks feed the site score. In page scope this contains only the focus page.",
+            "items": {
+              "$ref": "#/components/schemas/PageAuditResult"
+            }
+          },
+          "focusPage": {
+            "$ref": "#/components/schemas/PageAuditResult"
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/AuditCoverage"
           }
         }
       },
       "AuditPillar": {
         "type": "object",
-        "required": ["id", "name", "shortName", "description", "score", "checks"],
+        "required": [
+          "id",
+          "name",
+          "shortName",
+          "description",
+          "score",
+          "checks"
+        ],
         "properties": {
           "id": {
             "type": "string",
-            "enum": ["discovery", "access", "parseability", "structured"]
+            "enum": [
+              "discovery",
+              "access",
+              "parseability",
+              "structured"
+            ]
           },
           "name": {
             "type": "string"
@@ -270,7 +394,15 @@
       },
       "AuditCheck": {
         "type": "object",
-        "required": ["id", "label", "status", "summary", "detail", "weight"],
+        "required": [
+          "id",
+          "label",
+          "status",
+          "summary",
+          "detail",
+          "weight",
+          "scope"
+        ],
         "properties": {
           "id": {
             "type": "string"
@@ -280,7 +412,12 @@
           },
           "status": {
             "type": "string",
-            "enum": ["pass", "warn", "fail", "info"]
+            "enum": [
+              "pass",
+              "warn",
+              "fail",
+              "info"
+            ]
           },
           "summary": {
             "type": "string"
@@ -303,33 +440,71 @@
           "weight": {
             "type": "number",
             "exclusiveMinimum": 0
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "site",
+              "page"
+            ],
+            "description": "Whether the check runs once for the origin or once per sampled page."
+          },
+          "score": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Mean status score for an aggregated page check. When absent, scorePillar falls back to status points."
+          },
+          "sample": {
+            "$ref": "#/components/schemas/PageSampleSummary"
           }
         }
       },
       "CheckEvidence": {
         "type": "object",
-        "required": ["file", "line", "snippet"],
+        "required": [
+          "file",
+          "line",
+          "snippet"
+        ],
         "properties": {
           "file": {
             "type": "string",
             "example": "/robots.txt"
           },
           "line": {
-            "type": ["integer", "null"],
+            "type": [
+              "integer",
+              "null"
+            ],
             "minimum": 1
           },
           "snippet": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
       "CheckFix": {
         "type": "object",
-        "required": ["language", "code"],
+        "required": [
+          "language",
+          "code"
+        ],
         "properties": {
           "language": {
             "type": "string",
-            "enum": ["markdown", "robots", "html", "json", "http", "yaml", "text"]
+            "enum": [
+              "markdown",
+              "robots",
+              "html",
+              "json",
+              "http",
+              "yaml",
+              "text"
+            ]
           },
           "code": {
             "type": "string"
@@ -362,11 +537,18 @@
           },
           "method": {
             "type": "string",
-            "enum": ["heuristic", "override"]
+            "enum": [
+              "heuristic",
+              "override"
+            ]
           },
           "detected": {
             "type": "object",
-            "required": ["type", "label", "confidence"],
+            "required": [
+              "type",
+              "label",
+              "confidence"
+            ],
             "properties": {
               "type": {
                 "$ref": "#/components/schemas/SiteType"
@@ -406,7 +588,13 @@
             "type": "array",
             "items": {
               "type": "object",
-              "required": ["type", "label", "detail", "weight", "source"],
+              "required": [
+                "type",
+                "label",
+                "detail",
+                "weight",
+                "source"
+              ],
               "properties": {
                 "type": {
                   "$ref": "#/components/schemas/SiteType"
@@ -437,7 +625,11 @@
           },
           "compatibility": {
             "type": "object",
-            "required": ["openApiScored", "recommendedSchema", "note"],
+            "required": [
+              "openApiScored",
+              "recommendedSchema",
+              "note"
+            ],
             "properties": {
               "openApiScored": {
                 "type": "boolean"
@@ -457,11 +649,26 @@
       },
       "SiteType": {
         "type": "string",
-        "enum": ["saas", "portfolio", "docs", "ecommerce", "local-business", "blog-media"]
+        "enum": [
+          "saas",
+          "portfolio",
+          "docs",
+          "ecommerce",
+          "local-business",
+          "blog-media"
+        ]
       },
       "SiteProfile": {
         "type": "object",
-        "required": ["url", "finalUrl", "domain", "title", "description", "siteName", "language"],
+        "required": [
+          "url",
+          "finalUrl",
+          "domain",
+          "title",
+          "description",
+          "siteName",
+          "language"
+        ],
         "properties": {
           "url": {
             "type": "string"
@@ -482,13 +689,21 @@
             "type": "string"
           },
           "language": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
       "AuditPage": {
         "type": "object",
-        "required": ["url", "label", "section", "source"],
+        "required": [
+          "url",
+          "label",
+          "section",
+          "source"
+        ],
         "properties": {
           "url": {
             "type": "string",
@@ -502,13 +717,26 @@
           },
           "source": {
             "type": "string",
-            "enum": ["sitemap", "link", "home"]
+            "enum": [
+              "sitemap",
+              "link",
+              "home"
+            ]
           }
         }
       },
       "DiscoveryFile": {
         "type": "object",
-        "required": ["id", "label", "path", "url", "found", "statusCode", "bytes", "note"],
+        "required": [
+          "id",
+          "label",
+          "path",
+          "url",
+          "found",
+          "statusCode",
+          "bytes",
+          "note"
+        ],
         "properties": {
           "id": {
             "type": "string"
@@ -527,7 +755,10 @@
             "type": "boolean"
           },
           "statusCode": {
-            "type": ["integer", "null"]
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "bytes": {
             "type": "integer"
@@ -539,7 +770,17 @@
       },
       "QueuedFix": {
         "type": "object",
-        "required": ["checkId", "pillarId", "pillarName", "label", "status", "summary", "recommendation", "weight"],
+        "required": [
+          "checkId",
+          "pillarId",
+          "pillarName",
+          "label",
+          "status",
+          "summary",
+          "recommendation",
+          "weight",
+          "scope"
+        ],
         "properties": {
           "checkId": {
             "type": "string"
@@ -555,7 +796,10 @@
           },
           "status": {
             "type": "string",
-            "enum": ["warn", "fail"]
+            "enum": [
+              "warn",
+              "fail"
+            ]
           },
           "summary": {
             "type": "string"
@@ -571,16 +815,31 @@
           },
           "weight": {
             "type": "number"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "site",
+              "page"
+            ]
+          },
+          "sample": {
+            "$ref": "#/components/schemas/PageSampleSummary"
           }
         }
       },
       "AuditApiError": {
         "type": "object",
-        "required": ["error"],
+        "required": [
+          "error"
+        ],
         "properties": {
           "error": {
             "type": "object",
-            "required": ["code", "message"],
+            "required": [
+              "code",
+              "message"
+            ],
             "properties": {
               "code": {
                 "type": "string",
@@ -593,6 +852,255 @@
                 "type": "string"
               }
             }
+          }
+        }
+      },
+      "PageSampleSummary": {
+        "type": "object",
+        "required": [
+          "total",
+          "passed",
+          "warned",
+          "failed",
+          "affected"
+        ],
+        "description": "Coverage for a page-level check aggregated across the analyzed sample.",
+        "properties": {
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Pages that produced an observation."
+          },
+          "passed": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "warned": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "failed": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "affected": {
+            "type": "array",
+            "description": "Non-passing page URLs, capped for transport.",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            }
+          }
+        }
+      },
+      "PageAuditResult": {
+        "type": "object",
+        "required": [
+          "url",
+          "finalUrl",
+          "label",
+          "section",
+          "source",
+          "outcome",
+          "status",
+          "score",
+          "grade",
+          "checks",
+          "title",
+          "textChars",
+          "snr",
+          "h1Count",
+          "headingCount",
+          "jsonLdTypes",
+          "metaRobots",
+          "xRobotsTag",
+          "fetchMs"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "finalUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "label": {
+            "type": "string"
+          },
+          "section": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "home",
+              "sitemap",
+              "link",
+              "focus"
+            ]
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "analyzed",
+              "unreachable",
+              "not-html",
+              "off-origin"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "warn",
+              "fail",
+              "info"
+            ]
+          },
+          "score": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100
+          },
+          "grade": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "A",
+              "B",
+              "C",
+              "D",
+              "F",
+              null
+            ]
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AuditCheck"
+            }
+          },
+          "title": {
+            "type": "string"
+          },
+          "textChars": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "snr": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "h1Count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "headingCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "jsonLdTypes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "metaRobots": {
+            "type": "string"
+          },
+          "xRobotsTag": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "error": {
+            "type": "string"
+          },
+          "fetchMs": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "AuditCoverage": {
+        "type": "object",
+        "required": [
+          "method",
+          "inventorySize",
+          "listedPages",
+          "sampleSize",
+          "analyzedPages",
+          "failedPages",
+          "skippedPages",
+          "sitemapFound",
+          "homepageFallback",
+          "truncated",
+          "deadlineHit",
+          "note"
+        ],
+        "description": "How the inventory and sample were built, including failures and deadline truncation.",
+        "properties": {
+          "method": {
+            "type": "string",
+            "enum": [
+              "sitemap",
+              "links",
+              "homepage",
+              "page"
+            ]
+          },
+          "inventorySize": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Unique page-like URLs before the display cap."
+          },
+          "listedPages": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "URLs included in pages for the llms.txt editor."
+          },
+          "sampleSize": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Pages selected for the sample, including the seed."
+          },
+          "analyzedPages": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Pages that produced page-level checks."
+          },
+          "failedPages": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Selected pages that could not be analyzed."
+          },
+          "skippedPages": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Inventory pages not selected because of the cap or deadline."
+          },
+          "sitemapFound": {
+            "type": "boolean"
+          },
+          "homepageFallback": {
+            "type": "boolean"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "deadlineHit": {
+            "type": "boolean"
+          },
+          "note": {
+            "type": "string"
           }
         }
       }

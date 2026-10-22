@@ -63,6 +63,44 @@ export function isIndexablePage(url: string): boolean {
   }
 }
 
+const NON_PAGE_PREFIXES = [
+  "/api/",
+  "/admin/",
+  "/account/",
+  "/login",
+  "/logout",
+  "/cart",
+  "/checkout",
+  "/_next/",
+  "/static/",
+  "/assets/",
+  "/cdn-cgi/",
+];
+
+/**
+ * A page-like URL on the same origin, suitable for the audit sample.
+ * Sitemap URLs may contain content-selecting query strings; links may not.
+ */
+export function isPageCandidate(
+  value: string,
+  origin: string,
+  options: { allowQuery?: boolean } = {},
+): boolean {
+  try {
+    const url = new URL(value);
+    if (url.origin !== origin) return false;
+    if (!isIndexablePage(url.toString())) return false;
+    if (!options.allowQuery && url.search) return false;
+
+    const path = url.pathname.toLowerCase();
+    return !NON_PAGE_PREFIXES.some(
+      (prefix) => path === prefix.replace(/\/$/, "") || path.startsWith(prefix),
+    );
+  } catch {
+    return false;
+  }
+}
+
 function dedupe(values: string[]): string[] {
   return [...new Set(values)];
 }

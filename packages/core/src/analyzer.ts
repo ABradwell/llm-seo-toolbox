@@ -3,14 +3,18 @@ import { NodeHtmlMarkdown } from "node-html-markdown";
 
 import type {
   AuditCheck,
+  AuditCoverage,
+  AuditFix,
   AuditPage,
   AuditPillar,
   AuditResult,
+  AuditScope,
   CheckEvidence,
   CheckFix,
   CheckStatus,
   DiscoveryFile,
   FixLanguage,
+  PageAuditResult,
   RemovedNoise,
   SiteClassification,
   SiteProfile,
@@ -18,12 +22,13 @@ import type {
   VisionPayload,
 } from "./types";
 
+import { aggregatePageChecks, directPageChecks } from "./aggregate";
 import { classifySite } from "./classifier";
-import { buildContentModel, SNR_PASS, SNR_WARN, type ContentModel } from "./content";
-import { evaluateMetaRobots, evaluateXRobotsTag } from "./directives";
+import { buildContentModel, type ContentModel } from "./content";
 import { fetchText, type FetchTextOutcome } from "./fetch-page";
 import { sectionForPath } from "./llms";
 import { validateLlmsTxt, type LlmsTxtValidation } from "./llms-txt";
+import { analyzePage, extractJsonLd, failedPage } from "./page-audit";
 import {
   AI_CRAWLERS,
   crawlerAccess,
@@ -32,22 +37,34 @@ import {
   parseRobots,
   type RobotsData,
 } from "./robots";
+import {
+  buildInventory,
+  mapWithConcurrency,
+  SAMPLE_CONCURRENCY,
+  SAMPLE_DEADLINE_MS,
+  selectSample,
+  SITE_SAMPLE_SIZE,
+} from "./sampling";
 import { gradeFor, scoreAudit, scorePillar } from "./score";
 import { assertSafeUrl, UnsafeUrlError } from "./security";
-import { isIndexablePage, looksLikeHtml, parseSitemap } from "./sitemap";
+import { looksLikeHtml, parseSitemap } from "./sitemap";
 import { pathLabel, prettyDomain } from "./url";
 import { formatBytes, formatNumber, normalizeWhitespace } from "./format";
 
 const RAW_PREVIEW_LIMIT = 22_000;
 const MARKDOWN_LIMIT = 42_000;
-const MAX_PAGES = 80;
 const STANDARD_TIMEOUT_MS = 6_000;
+const PAGE_MAX_BYTES = 1_500_000;
 const CACHE_TTL_MS = 5 * 60 * 1000;
-const CACHE_MAX_ENTRIES = 30;
+const SITE_CACHE_MAX_ENTRIES = 30;
+const FOCUS_CACHE_MAX_ENTRIES = 50;
+const PAGE_SCOPE_CACHE_MAX_ENTRIES = 20;
 
 export interface AnalyzeOptions {
   /** A user-pinned V3 profile; the automatic classification is still reported. */
   siteType?: SiteType | null;
+  /** Site-scoped by default; `page` keeps the V2 hybrid audit. */
+  scope?: AuditScope;
   /** Per-request timeout. Defaults to the tuned web-audit budget. */
   timeoutMs?: number;
   /** Overrides the crawler user agent for every request in this audit. */
@@ -75,33 +92,75 @@ export class AuditError extends Error {
   }
 }
 
-interface CacheEntry {
-  expires: number;
-  value: AuditResult;
+interface SiteBase {
+  finalUrl: string;
+  origin: string;
+  profile: SiteProfile;
+  classification: SiteClassification;
+  pages: AuditPage[];
+  files: DiscoveryFile[];
+  pillars: AuditPillar[];
+  score: number;
+  grade: ReturnType<typeof gradeFor>;
+  fixes: AuditFix[];
+  coverage: AuditCoverage;
+  pageResults: PageAuditResult[];
+  seedPage: PageAuditResult;
+  seedVision: VisionPayload;
+  crawledAt: string;
 }
 
-const auditCache = new Map<string, CacheEntry>();
+interface FocusBase {
+  page: PageAuditResult;
+  vision: VisionPayload;
+}
 
-function readCache(key: string): AuditResult | null {
-  const hit = auditCache.get(key);
+interface CacheEntry<T> {
+  expires: number;
+  value: T;
+}
+
+const siteCache = new Map<string, CacheEntry<SiteBase>>();
+const focusCache = new Map<string, CacheEntry<FocusBase>>();
+const pageScopeCache = new Map<string, CacheEntry<AuditResult>>();
+
+function readCache<T>(
+  cache: Map<string, CacheEntry<T>>,
+  key: string,
+): { value: T; cached: boolean } | null {
+  const hit = cache.get(key);
   if (!hit) return null;
   if (hit.expires < Date.now()) {
-    auditCache.delete(key);
+    cache.delete(key);
     return null;
   }
-  return { ...hit.value, meta: { ...hit.value.meta, cached: true } };
+  return { value: hit.value, cached: true };
 }
 
-function writeCache(key: string, value: AuditResult): void {
-  if (auditCache.size >= CACHE_MAX_ENTRIES) {
-    const oldest = auditCache.keys().next().value;
-    if (oldest) auditCache.delete(oldest);
+function writeCache<T>(
+  cache: Map<string, CacheEntry<T>>,
+  key: string,
+  value: T,
+  maxEntries: number,
+): void {
+  if (cache.size >= maxEntries) {
+    const oldest = cache.keys().next().value;
+    if (oldest) cache.delete(oldest);
   }
-  auditCache.set(key, { expires: Date.now() + CACHE_TTL_MS, value });
+  cache.set(key, { expires: Date.now() + CACHE_TTL_MS, value });
 }
 
-function check(input: Omit<AuditCheck, "weight"> & { weight?: number }): AuditCheck {
-  return { weight: input.weight ?? 1, ...input };
+/** Test and instrumentation hook; the cache is in-memory per instance. */
+export function clearAuditCache(): void {
+  siteCache.clear();
+  focusCache.clear();
+  pageScopeCache.clear();
+}
+
+function check(
+  input: Omit<AuditCheck, "weight" | "scope"> & { weight?: number; scope?: AuditCheck["scope"] },
+): AuditCheck {
+  return { weight: input.weight ?? 1, scope: input.scope ?? "site", ...input };
 }
 
 function fix(language: FixLanguage, code: string): CheckFix {
@@ -125,12 +184,6 @@ function lineOfFirstMatch(source: string, pattern: RegExp): number | null {
     if (pattern.test(lines[index])) return index + 1;
   }
   return null;
-}
-
-function sourceLine(element: unknown): number | null {
-  if (!element || typeof element !== "object") return null;
-  const location = (element as { sourceCodeLocation?: { startLine?: number } }).sourceCodeLocation;
-  return location?.startLine ?? null;
 }
 
 function truncateForTransport(value: string, limit: number): { text: string; truncated: boolean } {
@@ -397,89 +450,6 @@ async function probeWellKnown(
 // Document extraction
 // ---------------------------------------------------------------------------
 
-interface JsonLdBlock {
-  line: number | null;
-  valid: boolean;
-  types: string[];
-  hasContext: boolean;
-}
-
-interface JsonLdReport {
-  valid: number;
-  invalid: number;
-  types: string[];
-  blocks: JsonLdBlock[];
-  firstValidLine: number | null;
-  firstBlockLine: number | null;
-}
-
-function extractJsonLd($: cheerio.CheerioAPI): JsonLdReport {
-  const blocks: JsonLdBlock[] = [];
-  const types = new Set<string>();
-
-  const collectTypes = (value: unknown): void => {
-    if (Array.isArray(value)) {
-      value.forEach(collectTypes);
-      return;
-    }
-    if (!value || typeof value !== "object") return;
-    const record = value as Record<string, unknown>;
-    const type = record["@type"];
-    if (typeof type === "string") types.add(type);
-    if (Array.isArray(type)) {
-      type.forEach((entry) => {
-        if (typeof entry === "string") types.add(entry);
-      });
-    }
-    if (Array.isArray(record["@graph"])) record["@graph"].forEach(collectTypes);
-  };
-
-  $('script[type="application/ld+json"]').each((_, element) => {
-    const raw = $(element).text().trim();
-    const line = sourceLine(element);
-    if (!raw) return;
-
-    try {
-      const parsed: unknown = JSON.parse(raw);
-      const record =
-        parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
-      collectTypes(parsed);
-      blocks.push({
-        line,
-        valid: true,
-        types: record && typeof record["@type"] === "string" ? [record["@type"]] : [],
-        hasContext: Boolean(record?.["@context"]),
-      });
-    } catch {
-      blocks.push({ line, valid: false, types: [], hasContext: false });
-    }
-  });
-
-  const validBlocks = blocks.filter((block) => block.valid);
-  const invalid = blocks.length - validBlocks.length;
-
-  return {
-    valid: validBlocks.length,
-    invalid,
-    types: [...types],
-    blocks,
-    firstValidLine: validBlocks[0]?.line ?? null,
-    firstBlockLine: blocks[0]?.line ?? null,
-  };
-}
-
-function extractMetaRobots($: cheerio.CheerioAPI): { value: string; line: number | null } {
-  const nodes = $('meta[name="robots"], meta[name="googlebot"]');
-  const value = nodes
-    .toArray()
-    .map((element) => $(element).attr("content") ?? "")
-    .filter((entry) => entry.trim())
-    .join(", ")
-    .toLowerCase();
-
-  return { value, line: sourceLine(nodes.first()[0]) };
-}
-
 function extractLinks($: cheerio.CheerioAPI, base: URL): string[] {
   const links = new Set<string>();
 
@@ -565,45 +535,6 @@ function buildVision(input: { html: string; title: string; content: ContentModel
     rawTruncated: raw.truncated,
     markdownTruncated: markdownPreview.truncated,
   };
-}
-
-function buildPages(sitemapUrls: string[], links: string[], finalUrl: URL): AuditPage[] {
-  const map = new Map<string, AuditPage>();
-
-  const add = (value: string, source: AuditPage["source"]) => {
-    let url: URL;
-    try {
-      url = new URL(value);
-    } catch {
-      return;
-    }
-
-    if (url.origin !== finalUrl.origin) return;
-    url.hash = "";
-
-    const normalized = url.toString();
-    if (map.has(normalized) || !isIndexablePage(normalized)) return;
-
-    const isHome = url.pathname === "/" || url.pathname === "";
-    map.set(normalized, {
-      url: normalized,
-      label: isHome ? "Home" : pathLabel(url.pathname),
-      section: sectionForPath(isHome ? "/" : url.pathname),
-      source,
-    });
-  };
-
-  add(finalUrl.toString(), "home");
-  for (const value of sitemapUrls) add(value, "sitemap");
-  for (const value of links) add(value, "link");
-
-  return [...map.values()]
-    .sort((a, b) => {
-      if (a.section === "Home") return -1;
-      if (b.section === "Home") return 1;
-      return a.url.localeCompare(b.url);
-    })
-    .slice(0, MAX_PAGES);
 }
 
 function buildFiles(
@@ -916,10 +847,12 @@ function buildAccessPillar(input: {
   origin: string;
   robots: RobotsData;
   robotsResponse: FetchTextOutcome;
-  metaRobots: { value: string; line: number | null };
-  xRobotsTag: string | null;
+  pageAccess: {
+    metaRobots: AuditCheck;
+    xRobotsTag: AuditCheck;
+  };
 }): AuditPillar {
-  const { origin, robots, robotsResponse, metaRobots, xRobotsTag } = input;
+  const { origin, robots, robotsResponse, pageAccess } = input;
   const checks: AuditCheck[] = [];
 
   let robotsStatus: CheckStatus = "pass";
@@ -1048,60 +981,7 @@ Allow: /`,
     );
   }
 
-  const metaVerdict = evaluateMetaRobots(metaRobots.value);
-  checks.push(
-    check({
-      id: "meta-robots",
-      label: "robots meta directives",
-      status: metaVerdict.status,
-      summary: metaVerdict.summary,
-      detail: metaVerdict.detail,
-      protocol: "HTML robots meta directives",
-      evidence: evidenceAt("/", metaRobots.line ?? null),
-      recommendation:
-        metaVerdict.status === "pass"
-          ? undefined
-          : "Remove noindex/none from the robots meta tag on pages that should be discoverable.",
-      fix:
-        metaVerdict.status === "pass"
-          ? undefined
-          : fix("html", `<meta name="robots" content="index, follow" />`),
-      weight: 1,
-    }),
-  );
-
-  const headerVerdict = evaluateXRobotsTag(xRobotsTag);
-  checks.push(
-    check({
-      id: "x-robots-tag",
-      label: "X-Robots-Tag header",
-      status: headerVerdict.status,
-      summary: headerVerdict.summary,
-      detail: headerVerdict.detail,
-      protocol: "X-Robots-Tag · RFC 9309",
-      evidence: {
-        file: "HTTP response headers",
-        line: null,
-        snippet: xRobotsTag ? `X-Robots-Tag: ${xRobotsTag}` : null,
-      },
-      recommendation:
-        headerVerdict.status === "pass"
-          ? undefined
-          : "Remove blocking X-Robots-Tag directives for public pages, or scope them to the paths that should stay private.",
-      fix:
-        headerVerdict.status === "pass"
-          ? undefined
-          : fix(
-              "http",
-              `# Allow indexing and AI grounding for public content
-X-Robots-Tag: index, follow
-
-# Keep private paths out
-# X-Robots-Tag: noindex  (scoped to /internal/*)`,
-            ),
-      weight: 2,
-    }),
-  );
+  checks.push(pageAccess.metaRobots, pageAccess.xRobotsTag);
 
   return {
     id: "access",
@@ -1113,156 +993,7 @@ X-Robots-Tag: index, follow
   };
 }
 
-function buildParseabilityPillar(content: ContentModel): AuditPillar {
-  const checks: AuditCheck[] = [];
-  const { headings } = content;
-  const h1Count = headings.filter((heading) => heading.level === 1).length;
-  const firstH1 = headings.find((heading) => heading.level === 1) ?? headings[0] ?? null;
-
-  checks.push(
-    check({
-      id: "h1",
-      label: "Single H1",
-      status: h1Count === 1 ? "pass" : h1Count === 0 ? "fail" : "warn",
-      summary: h1Count === 0 ? "Missing" : `${h1Count} × H1`,
-      detail:
-        h1Count === 1
-          ? "The content region has exactly one top-level heading."
-          : h1Count === 0
-            ? "No H1 heading was found in the content region."
-            : "Multiple H1 headings make the page topic ambiguous.",
-      protocol: "HTML heading outline",
-      evidence: evidenceAt("/", firstH1?.line ?? null),
-      recommendation:
-        h1Count === 1
-          ? undefined
-          : "Give the page exactly one descriptive H1 that names the topic.",
-      fix: h1Count === 1 ? undefined : fix("html", `<h1>Page topic in one clear sentence</h1>`),
-      weight: 1.5,
-    }),
-  );
-
-  let jumps = 0;
-  let firstJumpLine: number | null = null;
-  for (let index = 1; index < headings.length; index += 1) {
-    if (headings[index].level - headings[index - 1].level > 1) {
-      jumps += 1;
-      if (firstJumpLine === null) firstJumpLine = headings[index].line;
-    }
-  }
-  const startsDeep = headings.length > 0 && headings[0].level > 1;
-  const outline = headings
-    .slice(0, 14)
-    .map((heading) => `H${heading.level}`)
-    .join(" → ");
-
-  checks.push(
-    check({
-      id: "heading-order",
-      label: "Heading sequence",
-      status: headings.length === 0 ? "fail" : jumps > 0 || startsDeep ? "warn" : "pass",
-      summary:
-        headings.length === 0
-          ? "No headings"
-          : jumps > 0
-            ? `${jumps} level jump${jumps === 1 ? "" : "s"}`
-            : startsDeep
-              ? `Starts at H${headings[0].level}`
-              : "H1 → H2 → H3",
-      detail:
-        headings.length === 0
-          ? "The page contains no heading elements for a parser to build an outline from."
-          : `Outline: ${outline}${headings.length > 14 ? " → …" : ""}. ${
-              startsDeep ? "The outline starts deeper than H1. " : ""
-            }${jumps > 0 ? `${jumps} jump${jumps === 1 ? "" : "s"} skip a level.` : "No levels are skipped."}`,
-      protocol: "Semantic HTML heading hierarchy",
-      evidence: evidenceAt("/", firstJumpLine ?? headings[0]?.line ?? null),
-      recommendation:
-        headings.length > 0 && jumps === 0 && !startsDeep
-          ? undefined
-          : "Keep heading levels sequential (H1 → H2 → H3) so the document outline is unambiguous.",
-      fix:
-        headings.length > 0 && jumps === 0 && !startsDeep
-          ? undefined
-          : fix(
-              "html",
-              `<h1>Page topic</h1>
-  <h2>First section</h2>
-    <h3>Supporting detail</h3>
-  <h2>Second section</h2>`,
-            ),
-      weight: 2,
-    }),
-  );
-
-  const snrPct = content.snr * 100;
-  const snrStatus: CheckStatus =
-    content.snr >= SNR_PASS ? "pass" : content.snr >= SNR_WARN ? "warn" : "fail";
-
-  checks.push(
-    check({
-      id: "snr",
-      label: "Static HTML signal-to-noise",
-      status: snrStatus,
-      summary: `${snrPct.toFixed(1)}% signal`,
-      detail: `${formatNumber(content.snrSignalChars)} characters of content text against ${formatNumber(content.snrNoiseChars)} characters of navigation, footer, banner and widget text. V2 requires at least ${Math.round(SNR_PASS * 100)}% signal.`,
-      protocol: "Static HTML SNR ≥ 65%",
-      evidence: evidenceAt("/", content.scopeLine),
-      recommendation:
-        snrStatus === "pass"
-          ? undefined
-          : "Reduce repeated navigation and widget copy around the content region, and move primary prose into semantic main/article markup.",
-      fix:
-        snrStatus === "pass"
-          ? undefined
-          : fix(
-              "html",
-              `<main>
-  <article>
-    <h1>Primary topic</h1>
-    <p>Substantive, server-rendered prose that an agent can quote.</p>
-  </article>
-  <nav aria-label="On this page">…short table of contents…</nav>
-</main>`,
-            ),
-      weight: 2.5,
-    }),
-  );
-
-  const ssrStatus: CheckStatus =
-    content.textChars >= 600 ? "pass" : content.textChars >= 200 ? "warn" : "fail";
-
-  checks.push(
-    check({
-      id: "ssr-content",
-      label: "SSR payload readability",
-      status: ssrStatus,
-      summary: `${formatNumber(content.textChars)} chars in HTML`,
-      detail:
-        ssrStatus === "pass"
-          ? "Substantial content is present in the initial HTML response, so crawlers do not need to execute JavaScript."
-          : "The initial HTML response contains little readable content, which suggests client-side rendering or a JavaScript gate.",
-      protocol: "No-JS initial response",
-      evidence: evidenceAt("/", content.scopeLine),
-      recommendation:
-        ssrStatus === "pass"
-          ? undefined
-          : "Render primary content on the server (SSR/SSG) so it exists in the first HTML response.",
-      fix:
-        ssrStatus === "pass"
-          ? undefined
-          : fix(
-              "html",
-              `<!-- Server-render the primary content, not a client-only shell -->
-<main>
-  <h1>Page topic</h1>
-  <p>At least 600 characters of readable content in the initial response.</p>
-</main>`,
-            ),
-      weight: 2,
-    }),
-  );
-
+function buildParseabilityPillar(checks: AuditCheck[]): AuditPillar {
   return {
     id: "parseability",
     name: "Static Parseability",
@@ -1274,125 +1005,14 @@ function buildParseabilityPillar(content: ContentModel): AuditPillar {
 }
 
 function buildStructuredPillar(input: {
-  jsonLd: JsonLdReport;
   openApi: ProbeResult;
   wellKnown: ProbeResult & { entries: string[] };
   classification: SiteClassification;
+  pageStructured: AuditCheck[];
 }): AuditPillar {
-  const { jsonLd, openApi, wellKnown, classification } = input;
-  const checks: AuditCheck[] = [];
-  const recommendedSchema = classification.compatibility.recommendedSchema;
+  const { openApi, wellKnown, classification, pageStructured } = input;
+  const checks: AuditCheck[] = [...pageStructured];
   const profileLabel = classification.label;
-
-  const jsonLdStatus: CheckStatus =
-    jsonLd.valid > 0 ? "pass" : jsonLd.invalid > 0 ? "warn" : "fail";
-  const types = jsonLd.types.slice(0, 6);
-
-  checks.push(
-    check({
-      id: "json-ld",
-      label: "JSON-LD presence & syntax",
-      status: jsonLdStatus,
-      summary:
-        jsonLd.valid > 0
-          ? `${plural(jsonLd.valid, "valid block")}`
-          : jsonLd.invalid > 0
-            ? "Invalid JSON"
-            : "Missing",
-      detail:
-        jsonLd.valid > 0
-          ? `Valid structured data${types.length > 0 ? `: ${types.join(", ")}` : ""}.`
-          : jsonLd.invalid > 0
-            ? `${plural(jsonLd.invalid, "JSON-LD block")} could not be parsed.`
-            : "No JSON-LD structured data was found in the page head.",
-      protocol: "schema.org JSON-LD",
-      evidence: evidenceAt("/", jsonLd.firstBlockLine),
-      recommendation:
-        jsonLdStatus === "pass"
-          ? undefined
-          : "Add a JSON-LD block with @context and @type so the page can be classified without guessing.",
-      fix:
-        jsonLdStatus === "pass"
-          ? undefined
-          : fix(
-              "json",
-              JSON.stringify(
-                {
-                  "@context": "https://schema.org",
-                  "@type": recommendedSchema[0] ?? "TechArticle",
-                  headline: "Page topic",
-                  description: "One-sentence summary of the page.",
-                },
-                null,
-                2,
-              ),
-            ),
-      weight: 2.5,
-    }),
-  );
-
-  const present = recommendedSchema.filter((type) => jsonLd.types.includes(type));
-  const schemaStatus: CheckStatus =
-    present.length > 0 ? "pass" : jsonLd.valid > 0 ? "warn" : "fail";
-  const expected =
-    recommendedSchema.length > 2
-      ? `${recommendedSchema.slice(0, -1).join(", ")} or ${recommendedSchema[recommendedSchema.length - 1]}`
-      : recommendedSchema.join(" or ");
-
-  checks.push(
-    check({
-      id: "schema-types",
-      label: "Profile schema types",
-      status: schemaStatus,
-      summary: present.length > 0 ? present.join(", ") : `0 / ${recommendedSchema.length} found`,
-      detail: `The ${profileLabel} profile expects ${expected}. Found: ${
-        jsonLd.types.length > 0 ? jsonLd.types.join(", ") : "none"
-      }.`,
-      protocol: `schema.org · ${recommendedSchema.join(" / ")}`,
-      evidence: evidenceAt("/", jsonLd.firstValidLine ?? jsonLd.firstBlockLine),
-      recommendation:
-        schemaStatus === "pass"
-          ? undefined
-          : `Add a ${recommendedSchema[0]} object (or an equivalent ${profileLabel.toLowerCase()} type) to the page's JSON-LD.`,
-      fix:
-        schemaStatus === "pass"
-          ? undefined
-          : fix(
-              "json",
-              JSON.stringify(
-                {
-                  "@context": "https://schema.org",
-                  "@type": recommendedSchema[0] ?? "TechArticle",
-                  name: "Your site or page",
-                  description: "One-sentence summary matched to this profile.",
-                  ...(classification.type === "local-business"
-                    ? {
-                        address: {
-                          "@type": "PostalAddress",
-                          streetAddress: "1 Main Street",
-                          addressLocality: "Your city",
-                          addressCountry: "US",
-                        },
-                      }
-                    : {}),
-                  ...(classification.type === "ecommerce"
-                    ? {
-                        offers: {
-                          "@type": "Offer",
-                          price: "0.00",
-                          priceCurrency: "USD",
-                          availability: "https://schema.org/InStock",
-                        },
-                      }
-                    : {}),
-                },
-                null,
-                2,
-              ),
-            ),
-      weight: 1.5,
-    }),
-  );
 
   const openApiScored = classification.compatibility.openApiScored;
   const openApiStatus: CheckStatus = !openApiScored ? "info" : openApi.found ? "pass" : "warn";
@@ -1474,6 +1094,855 @@ Canonical: https://example.com/.well-known/security.txt`,
 // Orchestration
 // ---------------------------------------------------------------------------
 
+interface DiscoveryBundle {
+  robotsResponse: FetchTextOutcome;
+  llmsResponse: FetchTextOutcome;
+  llmsFullResponse: FetchTextOutcome;
+  robots: RobotsData;
+  sitemap: SitemapOutcome;
+  openApi: ProbeResult;
+  wellKnown: ProbeResult & { entries: string[] };
+}
+
+async function loadDiscovery(origin: string, settings: FetchSettings): Promise<DiscoveryBundle> {
+  const [robotsResponse, llmsResponse, llmsFullResponse, primarySitemap, openApi, wellKnown] =
+    await Promise.all([
+      fetchText(new URL("/robots.txt", origin), {
+        accept: "text/plain,*/*;q=0.5",
+        timeoutMs: settings.timeoutMs,
+        userAgent: settings.userAgent,
+        maxBytes: 300_000,
+      }),
+      fetchText(new URL("/llms.txt", origin), {
+        accept: "text/plain,text/markdown,*/*;q=0.5",
+        timeoutMs: settings.timeoutMs,
+        userAgent: settings.userAgent,
+        maxBytes: 400_000,
+      }),
+      fetchText(new URL("/llms-full.txt", origin), {
+        accept: "text/plain,text/markdown,*/*;q=0.5",
+        timeoutMs: settings.timeoutMs,
+        userAgent: settings.userAgent,
+        maxBytes: 2_000_000,
+      }),
+      fetchText(new URL("/sitemap.xml", origin), {
+        accept: "application/xml,text/xml,application/xhtml+xml,*/*;q=0.5",
+        timeoutMs: settings.timeoutMs,
+        userAgent: settings.userAgent,
+        maxBytes: 4_000_000,
+      }),
+      probeOpenApi(origin, settings),
+      probeWellKnown(origin, settings),
+    ]);
+
+  const robots =
+    robotsResponse.ok && !looksLikeHtml(robotsResponse.body)
+      ? parseRobots(robotsResponse.body)
+      : emptyRobots();
+
+  const sitemap = await loadSitemap(origin, robots, primarySitemap, settings);
+
+  return {
+    robotsResponse,
+    llmsResponse,
+    llmsFullResponse,
+    robots,
+    sitemap,
+    openApi,
+    wellKnown,
+  };
+}
+
+function isHtmlResponse(response: FetchTextOutcome): boolean {
+  const contentType = response.contentType.toLowerCase();
+  const head = response.body.slice(0, 300).toLowerCase();
+  return contentType.includes("html") || head.includes("<html") || head.includes("<!doctype html");
+}
+
+function assertFetchable(response: FetchTextOutcome): void {
+  if (response.unsafe) {
+    throw new AuditError("blocked_url", response.error ?? "The URL is not allowed.", 400);
+  }
+
+  if (response.error) {
+    throw new AuditError(
+      "fetch_failed",
+      response.error,
+      502,
+      "The site may be blocking automated requests, be offline, or be slow to respond.",
+    );
+  }
+
+  if (!response.ok) {
+    throw new AuditError(
+      "http_error",
+      `The page responded with HTTP ${response.status}.`,
+      502,
+      response.status === 403 || response.status === 401
+        ? "Some sites block automated audits. Try again or audit a different URL."
+        : undefined,
+    );
+  }
+
+  if (!isHtmlResponse(response)) {
+    throw new AuditError("not_html", "That URL did not return an HTML page.", 415);
+  }
+}
+
+function fetchHtml(
+  url: URL,
+  settings: FetchSettings,
+  timeoutMs = settings.timeoutMs,
+): Promise<FetchTextOutcome> {
+  return fetchText(url, {
+    accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.6",
+    timeoutMs,
+    userAgent: settings.userAgent,
+    maxBytes: 2_500_000,
+  });
+}
+
+function sameUrl(a: string, b: string): boolean {
+  try {
+    const left = new URL(a);
+    const right = new URL(b);
+    left.hash = "";
+    right.hash = "";
+    return left.toString() === right.toString();
+  } catch {
+    return false;
+  }
+}
+
+function toAuditPage(url: URL, source: AuditPage["source"] = "home"): AuditPage {
+  const isHome = url.pathname === "/" || url.pathname === "";
+  return {
+    url: url.toString(),
+    label: isHome ? "Home" : pathLabel(url.pathname),
+    section: sectionForPath(isHome ? "/" : url.pathname),
+    source,
+  };
+}
+
+function buildFixes(pillars: AuditPillar[]): AuditFix[] {
+  return pillars
+    .flatMap((pillar) =>
+      pillar.checks
+        .filter((entry) => entry.status === "fail" || entry.status === "warn")
+        .map((entry) => ({
+          checkId: entry.id,
+          pillarId: pillar.id,
+          pillarName: pillar.shortName,
+          label: entry.label,
+          status: entry.status,
+          summary: entry.summary,
+          recommendation: entry.recommendation ?? "Review this check and adjust the site.",
+          evidence: entry.evidence,
+          fix: entry.fix,
+          weight: entry.weight,
+          scope: entry.scope,
+          sample: entry.sample,
+        })),
+    )
+    .sort((a, b) => {
+      const rank = (status: CheckStatus) => (status === "fail" ? 0 : status === "warn" ? 1 : 2);
+      if (rank(a.status) !== rank(b.status)) return rank(a.status) - rank(b.status);
+      return b.weight - a.weight;
+    })
+    .slice(0, 8);
+}
+
+function coverageNote(input: {
+  method: AuditCoverage["method"];
+  inventorySize: number;
+  analyzedPages: number;
+  failedPages: number;
+  deadlineHit: boolean;
+  homepageFallback: boolean;
+}): string {
+  if (input.method === "page") {
+    return "Page-scoped audit · origin-wide manifests and access rules are still checked.";
+  }
+
+  const source =
+    input.method === "sitemap"
+      ? "the sitemap"
+      : input.method === "links"
+        ? "homepage links"
+        : "the homepage";
+  const parts = [
+    `Analyzed ${input.analyzedPages} of ${formatNumber(input.inventorySize)} pages from ${source}`,
+  ];
+  if (input.failedPages > 0) {
+    parts.push(
+      `${input.failedPages} selected page${input.failedPages === 1 ? "" : "s"} could not be read`,
+    );
+  }
+  if (input.deadlineHit) parts.push("the sampling deadline was reached");
+  if (input.homepageFallback) parts.push("the focus page was used as the site seed");
+  return `${parts.join(" · ")}.`;
+}
+
+function focusFailure(input: {
+  requested: URL;
+  outcome: "unreachable" | "not-html" | "off-origin";
+  error: string;
+  finalUrl?: string;
+  fetchMs: number;
+}): FocusBase {
+  return {
+    page: failedPage({
+      url: input.requested.toString(),
+      finalUrl: input.finalUrl ?? input.requested.toString(),
+      label: pathLabel(input.requested.pathname),
+      section: sectionForPath(input.requested.pathname),
+      source: "focus",
+      outcome: input.outcome,
+      error: input.error,
+      fetchMs: input.fetchMs,
+    }),
+    vision: {
+      rawHtml: "",
+      markdown: "",
+      htmlBytes: 0,
+      markdownBytes: 0,
+      textBytes: 0,
+      reductionPct: 0,
+      tokenEstimate: { html: 0, markdown: 0 },
+      removed: { scripts: 0, styles: 0, landmarks: 0, svg: 0, frames: 0 },
+      rawTruncated: false,
+      markdownTruncated: false,
+    },
+  };
+}
+
+function fetchSettings(options: AnalyzeOptions): FetchSettings {
+  return {
+    timeoutMs: options.timeoutMs ?? STANDARD_TIMEOUT_MS,
+    userAgent: options.userAgent,
+  };
+}
+
+async function buildSiteBase(requested: URL, options: AnalyzeOptions): Promise<SiteBase> {
+  const settings = fetchSettings(options);
+  const homeTimeoutMs = options.timeoutMs ?? 9_000;
+  const seedUrl = new URL("/", requested.origin);
+  let seedResponse: FetchTextOutcome;
+  let homepageFallback = false;
+
+  try {
+    seedResponse = await fetchHtml(seedUrl, settings, homeTimeoutMs);
+    assertFetchable(seedResponse);
+  } catch (error) {
+    if (sameUrl(requested.toString(), seedUrl.toString())) throw error;
+    seedResponse = await fetchHtml(requested, settings, homeTimeoutMs);
+    assertFetchable(seedResponse);
+    homepageFallback = true;
+  }
+
+  const finalUrl = new URL(seedResponse.finalUrl);
+  const origin = finalUrl.origin;
+  const discovery = await loadDiscovery(origin, settings);
+  const { robots, robotsResponse, sitemap, openApi, wellKnown } = discovery;
+  const $ = cheerio.load(seedResponse.body, { sourceCodeLocationInfo: true });
+
+  const title =
+    normalizeWhitespace($("head title").first().text()) ||
+    normalizeWhitespace($('meta[property="og:title"]').attr("content") ?? "") ||
+    prettyDomain(finalUrl.toString());
+
+  const description =
+    $('meta[name="description"]').attr("content")?.trim() ??
+    $('meta[property="og:description"]').attr("content")?.trim() ??
+    "";
+
+  const siteName =
+    $('meta[property="og:site_name"]').attr("content")?.trim() ||
+    title.split(/[|·—–-]/)[0]?.trim() ||
+    prettyDomain(finalUrl.toString());
+
+  const language = $("html").attr("lang")?.trim() ?? null;
+  const ogType = $('meta[property="og:type"]').attr("content")?.trim().toLowerCase() ?? null;
+
+  const profile: SiteProfile = {
+    url: requested.toString(),
+    finalUrl: finalUrl.toString(),
+    domain: prettyDomain(finalUrl.toString()),
+    title: title.slice(0, 300),
+    description: normalizeWhitespace(description).slice(0, 600),
+    siteName: siteName.slice(0, 120),
+    language,
+  };
+
+  const content = buildContentModel(seedResponse.body);
+  const jsonLd = extractJsonLd($);
+  const links = extractLinks($, finalUrl);
+  const seedVision = buildVision({ html: seedResponse.body, title, content });
+
+  const classification = classifySite(
+    {
+      finalUrl: finalUrl.toString(),
+      html: seedResponse.body,
+      title,
+      description,
+      ogType,
+      jsonLdTypes: jsonLd.types,
+      sitemapUrls: sitemap.urls,
+      navUrls: links,
+      llmsTxt:
+        discovery.llmsResponse.ok && !looksLikeHtml(discovery.llmsResponse.body)
+          ? discovery.llmsResponse.body
+          : null,
+      hasOpenApi: openApi.found,
+    },
+    { override: options.siteType ?? null },
+  );
+
+  const inventory = buildInventory({
+    origin,
+    seedUrl: finalUrl.toString(),
+    sitemapUrls: sitemap.urls,
+    homepageLinks: links,
+  });
+  const sample = selectSample(inventory.all, SITE_SAMPLE_SIZE);
+  const seedAuditPage =
+    inventory.all.find((page) => page.source === "home") ?? toAuditPage(finalUrl, "home");
+
+  const seedPage = analyzePage({
+    page: seedAuditPage,
+    html: seedResponse.body,
+    headers: seedResponse.headers,
+    finalUrl: finalUrl.toString(),
+    recommendedSchema: classification.compatibility.recommendedSchema,
+    profileLabel: classification.label,
+    profileType: classification.type,
+    content,
+    source: "home",
+    fetchMs: 0,
+  });
+
+  const deadlineAt = Date.now() + SAMPLE_DEADLINE_MS;
+  let deadlineHit = false;
+  const others = sample.filter((page) => page.url !== seedPage.url);
+
+  const extra = await mapWithConcurrency(others, SAMPLE_CONCURRENCY, async (page) => {
+    if (Date.now() >= deadlineAt) {
+      deadlineHit = true;
+      return null;
+    }
+
+    const pageStarted = Date.now();
+    try {
+      const response = await fetchText(page.url, {
+        accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.6",
+        timeoutMs: settings.timeoutMs,
+        userAgent: settings.userAgent,
+        maxBytes: PAGE_MAX_BYTES,
+      });
+
+      if (response.unsafe || response.error || !response.ok) {
+        return failedPage({
+          url: page.url,
+          finalUrl: response.finalUrl,
+          label: page.label,
+          section: page.section,
+          source: page.source,
+          outcome: "unreachable",
+          error:
+            response.error ??
+            (response.status ? `The page responded with HTTP ${response.status}.` : "Unreachable."),
+          fetchMs: Date.now() - pageStarted,
+        });
+      }
+
+      const pageFinal = new URL(response.finalUrl);
+      if (pageFinal.origin !== origin) {
+        return failedPage({
+          url: page.url,
+          finalUrl: pageFinal.toString(),
+          label: page.label,
+          section: page.section,
+          source: page.source,
+          outcome: "off-origin",
+          error: "The page redirected off the audited origin.",
+          fetchMs: Date.now() - pageStarted,
+        });
+      }
+
+      if (!isHtmlResponse(response)) {
+        return failedPage({
+          url: page.url,
+          finalUrl: pageFinal.toString(),
+          label: page.label,
+          section: page.section,
+          source: page.source,
+          outcome: "not-html",
+          error: "The page did not return HTML.",
+          fetchMs: Date.now() - pageStarted,
+        });
+      }
+
+      return analyzePage({
+        page,
+        html: response.body,
+        headers: response.headers,
+        finalUrl: pageFinal.toString(),
+        recommendedSchema: classification.compatibility.recommendedSchema,
+        profileLabel: classification.label,
+        profileType: classification.type,
+        fetchMs: Date.now() - pageStarted,
+      });
+    } catch (error) {
+      return failedPage({
+        url: page.url,
+        label: page.label,
+        section: page.section,
+        source: page.source,
+        outcome: "unreachable",
+        error: error instanceof Error ? error.message : "The page could not be fetched.",
+        fetchMs: Date.now() - pageStarted,
+      });
+    }
+  });
+
+  const seen = new Set([seedPage.finalUrl]);
+  const pageResults: PageAuditResult[] = [seedPage];
+  for (const result of extra) {
+    if (!result) continue;
+    if (result.outcome === "analyzed") {
+      if (seen.has(result.finalUrl)) continue;
+      seen.add(result.finalUrl);
+    }
+    pageResults.push(result);
+  }
+
+  const analyzedPages = pageResults.filter((page) => page.outcome === "analyzed").length;
+  const failedPages = pageResults.length - analyzedPages;
+  const skippedPages = Math.max(0, inventory.inventorySize - sample.length);
+  const truncated = skippedPages > 0 || deadlineHit;
+
+  const coverage: AuditCoverage = {
+    method: inventory.method,
+    inventorySize: inventory.inventorySize,
+    listedPages: inventory.pages.length,
+    sampleSize: sample.length,
+    analyzedPages,
+    failedPages,
+    skippedPages,
+    sitemapFound: sitemap.found,
+    homepageFallback,
+    truncated,
+    deadlineHit,
+    note: coverageNote({
+      method: inventory.method,
+      inventorySize: inventory.inventorySize,
+      analyzedPages,
+      failedPages,
+      deadlineHit,
+      homepageFallback,
+    }),
+  };
+
+  const pageChecks = aggregatePageChecks(pageResults);
+  const pillars: AuditPillar[] = [
+    buildDiscoveryPillar({
+      origin,
+      llms: discovery.llmsResponse,
+      llmsFull: discovery.llmsFullResponse,
+      sitemap,
+      robots,
+      robotsBody: robotsResponse.body,
+    }),
+    buildAccessPillar({
+      origin,
+      robots,
+      robotsResponse,
+      pageAccess: pageChecks.access,
+    }),
+    buildParseabilityPillar(pageChecks.parseability),
+    buildStructuredPillar({
+      openApi,
+      wellKnown,
+      classification,
+      pageStructured: pageChecks.structured,
+    }),
+  ].map((pillar) => ({ ...pillar, score: scorePillar(pillar) }));
+
+  const score = scoreAudit(pillars);
+  const files = buildFiles(
+    origin,
+    robotsResponse,
+    discovery.llmsResponse,
+    discovery.llmsFullResponse,
+    sitemap,
+    openApi,
+    wellKnown,
+  );
+
+  return {
+    finalUrl: finalUrl.toString(),
+    origin,
+    profile,
+    classification,
+    pages: inventory.pages,
+    files,
+    pillars,
+    score,
+    grade: gradeFor(score),
+    fixes: buildFixes(pillars),
+    coverage,
+    pageResults,
+    seedPage,
+    seedVision,
+    crawledAt: new Date().toISOString(),
+  };
+}
+
+async function buildFocus(
+  requested: URL,
+  base: SiteBase,
+  options: AnalyzeOptions,
+): Promise<FocusBase> {
+  const started = Date.now();
+  const settings = fetchSettings(options);
+  const homeTimeoutMs = options.timeoutMs ?? 9_000;
+
+  try {
+    const response = await fetchHtml(requested, settings, homeTimeoutMs);
+
+    if (response.unsafe || response.error || !response.ok) {
+      const fromSample = base.pageResults.find(
+        (page) =>
+          sameUrl(page.url, requested.toString()) || sameUrl(page.finalUrl, requested.toString()),
+      );
+      if (fromSample) return { page: fromSample, vision: base.seedVision };
+      return focusFailure({
+        requested,
+        outcome: "unreachable",
+        error:
+          response.error ??
+          (response.status ? `The page responded with HTTP ${response.status}.` : "Unreachable."),
+        finalUrl: response.finalUrl,
+        fetchMs: Date.now() - started,
+      });
+    }
+
+    const finalUrl = new URL(response.finalUrl);
+    if (finalUrl.origin !== base.origin) {
+      return focusFailure({
+        requested,
+        outcome: "off-origin",
+        error: "The page redirected off the audited origin.",
+        finalUrl: finalUrl.toString(),
+        fetchMs: Date.now() - started,
+      });
+    }
+
+    if (!isHtmlResponse(response)) {
+      return focusFailure({
+        requested,
+        outcome: "not-html",
+        error: "The page did not return HTML.",
+        finalUrl: finalUrl.toString(),
+        fetchMs: Date.now() - started,
+      });
+    }
+
+    const content = buildContentModel(response.body);
+    const fromSample = base.pageResults.find((page) => sameUrl(page.finalUrl, finalUrl.toString()));
+    const page =
+      fromSample ??
+      analyzePage({
+        page: toAuditPage(finalUrl, "home"),
+        html: response.body,
+        headers: response.headers,
+        finalUrl: finalUrl.toString(),
+        recommendedSchema: base.classification.compatibility.recommendedSchema,
+        profileLabel: base.classification.label,
+        profileType: base.classification.type,
+        content,
+        source: "focus",
+        fetchMs: Date.now() - started,
+      });
+
+    const vision = buildVision({
+      html: response.body,
+      title: page.title || prettyDomain(finalUrl.toString()),
+      content,
+    });
+
+    return { page, vision };
+  } catch (error) {
+    const fromSample = base.pageResults.find(
+      (page) =>
+        sameUrl(page.url, requested.toString()) || sameUrl(page.finalUrl, requested.toString()),
+    );
+    if (fromSample) return { page: fromSample, vision: base.seedVision };
+    return focusFailure({
+      requested,
+      outcome: "unreachable",
+      error: error instanceof Error ? error.message : "The page could not be fetched.",
+      fetchMs: Date.now() - started,
+    });
+  }
+}
+
+async function analyzeSiteScope(
+  requested: URL,
+  options: AnalyzeOptions,
+  startedAt: number,
+): Promise<AuditResult> {
+  const cacheEnabled = options.cache !== false;
+  const siteKey = `${requested.origin}::${options.siteType ?? "auto"}`;
+  const siteHit = cacheEnabled ? readCache(siteCache, siteKey) : null;
+  const siteCached = Boolean(siteHit);
+  const base = siteHit?.value ?? (await buildSiteBase(requested, options));
+  if (cacheEnabled && !siteHit) writeCache(siteCache, siteKey, base, SITE_CACHE_MAX_ENTRIES);
+
+  const seedIsFocus =
+    (requested.pathname === "/" && !requested.search) ||
+    sameUrl(requested.toString(), base.finalUrl) ||
+    sameUrl(requested.toString(), base.seedPage.finalUrl);
+
+  let focus: FocusBase;
+  let focusCached = false;
+
+  if (seedIsFocus) {
+    focus = { page: base.seedPage, vision: base.seedVision };
+    focusCached = siteCached;
+  } else {
+    const focusKey = `${requested.toString()}::${options.siteType ?? "auto"}`;
+    const focusHit = cacheEnabled ? readCache(focusCache, focusKey) : null;
+    if (focusHit) {
+      focus = focusHit.value;
+      focusCached = true;
+    } else {
+      focus = await buildFocus(requested, base, options);
+      if (cacheEnabled) writeCache(focusCache, focusKey, focus, FOCUS_CACHE_MAX_ENTRIES);
+    }
+  }
+
+  return {
+    scope: "site",
+    url: requested.toString(),
+    finalUrl: base.finalUrl,
+    focusUrl: focus.page.finalUrl,
+    domain: base.profile.domain,
+    score: base.score,
+    grade: base.grade.grade,
+    gradeLabel: base.grade.label,
+    pillars: base.pillars,
+    classification: base.classification,
+    profile: { ...base.profile, url: requested.toString(), finalUrl: base.finalUrl },
+    pages: base.pages,
+    pageResults: base.pageResults,
+    focusPage: focus.page,
+    coverage: base.coverage,
+    files: base.files,
+    vision: focus.vision,
+    fixes: base.fixes,
+    meta: {
+      fetchMs: Date.now() - startedAt,
+      pageCount: base.pages.length,
+      discoveredPageCount: base.coverage.inventorySize,
+      sampledPageCount: base.coverage.analyzedPages,
+      crawledAt: base.crawledAt,
+      cached: siteCached && focusCached,
+      siteCached,
+      focusCached,
+      scoringVersion: "site-1",
+    },
+  };
+}
+
+async function analyzePageScope(
+  requested: URL,
+  options: AnalyzeOptions,
+  startedAt: number,
+): Promise<AuditResult> {
+  const cacheEnabled = options.cache !== false;
+  const settings = fetchSettings(options);
+  const homeTimeoutMs = options.timeoutMs ?? 9_000;
+  const cacheKey = `${requested.toString()}::${options.siteType ?? "auto"}::page`;
+  const hit = cacheEnabled ? readCache(pageScopeCache, cacheKey) : null;
+  if (hit) {
+    return {
+      ...hit.value,
+      meta: { ...hit.value.meta, cached: true, siteCached: true, focusCached: true },
+    };
+  }
+
+  const response = await fetchHtml(requested, settings, homeTimeoutMs);
+  assertFetchable(response);
+
+  const finalUrl = new URL(response.finalUrl);
+  const origin = finalUrl.origin;
+  const discovery = await loadDiscovery(origin, settings);
+  const { robots, robotsResponse, sitemap, openApi, wellKnown } = discovery;
+  const $ = cheerio.load(response.body, { sourceCodeLocationInfo: true });
+
+  const title =
+    normalizeWhitespace($("head title").first().text()) ||
+    normalizeWhitespace($('meta[property="og:title"]').attr("content") ?? "") ||
+    prettyDomain(finalUrl.toString());
+  const description =
+    $('meta[name="description"]').attr("content")?.trim() ??
+    $('meta[property="og:description"]').attr("content")?.trim() ??
+    "";
+  const siteName =
+    $('meta[property="og:site_name"]').attr("content")?.trim() ||
+    title.split(/[|·—–-]/)[0]?.trim() ||
+    prettyDomain(finalUrl.toString());
+  const language = $("html").attr("lang")?.trim() ?? null;
+  const ogType = $('meta[property="og:type"]').attr("content")?.trim().toLowerCase() ?? null;
+
+  const profile: SiteProfile = {
+    url: requested.toString(),
+    finalUrl: finalUrl.toString(),
+    domain: prettyDomain(finalUrl.toString()),
+    title: title.slice(0, 300),
+    description: normalizeWhitespace(description).slice(0, 600),
+    siteName: siteName.slice(0, 120),
+    language,
+  };
+
+  const content = buildContentModel(response.body);
+  const jsonLd = extractJsonLd($);
+  const links = extractLinks($, finalUrl);
+  const vision = buildVision({ html: response.body, title, content });
+
+  const classification = classifySite(
+    {
+      finalUrl: finalUrl.toString(),
+      html: response.body,
+      title,
+      description,
+      ogType,
+      jsonLdTypes: jsonLd.types,
+      sitemapUrls: sitemap.urls,
+      navUrls: links,
+      llmsTxt:
+        discovery.llmsResponse.ok && !looksLikeHtml(discovery.llmsResponse.body)
+          ? discovery.llmsResponse.body
+          : null,
+      hasOpenApi: openApi.found,
+    },
+    { override: options.siteType ?? null },
+  );
+
+  const inventory = buildInventory({
+    origin,
+    seedUrl: finalUrl.toString(),
+    sitemapUrls: sitemap.urls,
+    homepageLinks: links,
+  });
+
+  const page = analyzePage({
+    page: toAuditPage(finalUrl, "home"),
+    html: response.body,
+    headers: response.headers,
+    finalUrl: finalUrl.toString(),
+    recommendedSchema: classification.compatibility.recommendedSchema,
+    profileLabel: classification.label,
+    profileType: classification.type,
+    content,
+    source: "focus",
+    fetchMs: 0,
+  });
+
+  const pageChecks = directPageChecks(page);
+  const pillars: AuditPillar[] = [
+    buildDiscoveryPillar({
+      origin,
+      llms: discovery.llmsResponse,
+      llmsFull: discovery.llmsFullResponse,
+      sitemap,
+      robots,
+      robotsBody: robotsResponse.body,
+    }),
+    buildAccessPillar({
+      origin,
+      robots,
+      robotsResponse,
+      pageAccess: pageChecks.access,
+    }),
+    buildParseabilityPillar(pageChecks.parseability),
+    buildStructuredPillar({
+      openApi,
+      wellKnown,
+      classification,
+      pageStructured: pageChecks.structured,
+    }),
+  ].map((pillar) => ({ ...pillar, score: scorePillar(pillar) }));
+
+  const score = scoreAudit(pillars);
+  const files = buildFiles(
+    origin,
+    robotsResponse,
+    discovery.llmsResponse,
+    discovery.llmsFullResponse,
+    sitemap,
+    openApi,
+    wellKnown,
+  );
+  const siteRoot = new URL("/", origin).toString();
+
+  const result: AuditResult = {
+    scope: "page",
+    url: requested.toString(),
+    finalUrl: siteRoot,
+    focusUrl: finalUrl.toString(),
+    domain: profile.domain,
+    score,
+    grade: gradeFor(score).grade,
+    gradeLabel: gradeFor(score).label,
+    pillars,
+    classification,
+    profile,
+    pages: inventory.pages,
+    pageResults: [page],
+    focusPage: page,
+    coverage: {
+      method: "page",
+      inventorySize: inventory.inventorySize,
+      listedPages: inventory.pages.length,
+      sampleSize: 1,
+      analyzedPages: 1,
+      failedPages: 0,
+      skippedPages: 0,
+      sitemapFound: sitemap.found,
+      homepageFallback: false,
+      truncated: false,
+      deadlineHit: false,
+      note: coverageNote({
+        method: "page",
+        inventorySize: inventory.inventorySize,
+        analyzedPages: 1,
+        failedPages: 0,
+        deadlineHit: false,
+        homepageFallback: false,
+      }),
+    },
+    files,
+    vision,
+    fixes: buildFixes(pillars),
+    meta: {
+      fetchMs: Date.now() - startedAt,
+      pageCount: inventory.pages.length,
+      discoveredPageCount: inventory.inventorySize,
+      sampledPageCount: 1,
+      crawledAt: new Date().toISOString(),
+      cached: false,
+      siteCached: false,
+      focusCached: false,
+      scoringVersion: "site-1",
+    },
+  };
+
+  if (cacheEnabled) writeCache(pageScopeCache, cacheKey, result, PAGE_SCOPE_CACHE_MAX_ENTRIES);
+  return result;
+}
+
 export async function analyzeSite(
   rawInput: string,
   options: AnalyzeOptions = {},
@@ -1492,231 +1961,8 @@ export async function analyzeSite(
     );
   }
 
-  const cacheEnabled = options.cache !== false;
-  const cacheKey = `${requested.toString()}::${options.siteType ?? "auto"}`;
-  const cached = cacheEnabled ? readCache(cacheKey) : null;
-  if (cached) return cached;
-
-  const settings: FetchSettings = {
-    timeoutMs: options.timeoutMs ?? STANDARD_TIMEOUT_MS,
-    userAgent: options.userAgent,
-  };
-  const homeTimeoutMs = options.timeoutMs ?? 9_000;
-
-  const homeResponse = await fetchText(requested, {
-    accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.6",
-    timeoutMs: homeTimeoutMs,
-    userAgent: options.userAgent,
-    maxBytes: 2_500_000,
-  });
-
-  if (homeResponse.unsafe) {
-    throw new AuditError("blocked_url", homeResponse.error ?? "The URL is not allowed.", 400);
-  }
-
-  if (homeResponse.error) {
-    throw new AuditError(
-      "fetch_failed",
-      homeResponse.error,
-      502,
-      "The site may be blocking automated requests, be offline, or be slow to respond.",
-    );
-  }
-
-  if (!homeResponse.ok) {
-    throw new AuditError(
-      "http_error",
-      `The page responded with HTTP ${homeResponse.status}.`,
-      502,
-      homeResponse.status === 403 || homeResponse.status === 401
-        ? "Some sites block automated audits. Try again or audit a different URL."
-        : undefined,
-    );
-  }
-
-  const contentType = homeResponse.contentType.toLowerCase();
-  const head = homeResponse.body.slice(0, 300).toLowerCase();
-  if (
-    !contentType.includes("html") &&
-    !head.includes("<html") &&
-    !head.includes("<!doctype html")
-  ) {
-    throw new AuditError("not_html", "That URL did not return an HTML page.", 415);
-  }
-
-  const finalUrl = new URL(homeResponse.finalUrl);
-  const origin = finalUrl.origin;
-
-  const [robotsResponse, llmsResponse, llmsFullResponse, openApi, wellKnown] = await Promise.all([
-    fetchText(new URL("/robots.txt", origin), {
-      accept: "text/plain,*/*;q=0.5",
-      timeoutMs: settings.timeoutMs,
-      userAgent: settings.userAgent,
-      maxBytes: 300_000,
-    }),
-    fetchText(new URL("/llms.txt", origin), {
-      accept: "text/plain,text/markdown,*/*;q=0.5",
-      timeoutMs: settings.timeoutMs,
-      userAgent: settings.userAgent,
-      maxBytes: 400_000,
-    }),
-    fetchText(new URL("/llms-full.txt", origin), {
-      accept: "text/plain,text/markdown,*/*;q=0.5",
-      timeoutMs: settings.timeoutMs,
-      userAgent: settings.userAgent,
-      maxBytes: 2_000_000,
-    }),
-    probeOpenApi(origin, settings),
-    probeWellKnown(origin, settings),
-  ]);
-
-  const robots =
-    robotsResponse.ok && !looksLikeHtml(robotsResponse.body)
-      ? parseRobots(robotsResponse.body)
-      : emptyRobots();
-
-  const primarySitemap = await fetchText(new URL("/sitemap.xml", origin), {
-    accept: "application/xml,text/xml,application/xhtml+xml,*/*;q=0.5",
-    timeoutMs: settings.timeoutMs,
-    userAgent: settings.userAgent,
-    maxBytes: 4_000_000,
-  });
-
-  const sitemap = await loadSitemap(origin, robots, primarySitemap, settings);
-
-  const $ = cheerio.load(homeResponse.body, { sourceCodeLocationInfo: true });
-
-  const title =
-    normalizeWhitespace($("head title").first().text()) ||
-    normalizeWhitespace($('meta[property="og:title"]').attr("content") ?? "") ||
-    prettyDomain(finalUrl.toString());
-
-  const description =
-    $('meta[name="description"]').attr("content")?.trim() ??
-    $('meta[property="og:description"]').attr("content")?.trim() ??
-    "";
-
-  const siteName =
-    $('meta[property="og:site_name"]').attr("content")?.trim() ||
-    title.split(/[|·—–-]/)[0]?.trim() ||
-    prettyDomain(finalUrl.toString());
-
-  const language = $("html").attr("lang")?.trim() ?? null;
-  const metaRobots = extractMetaRobots($);
-  const ogType = $('meta[property="og:type"]').attr("content")?.trim().toLowerCase() ?? null;
-
-  const profile: SiteProfile = {
-    url: requested.toString(),
-    finalUrl: finalUrl.toString(),
-    domain: prettyDomain(finalUrl.toString()),
-    title: title.slice(0, 300),
-    description: normalizeWhitespace(description).slice(0, 600),
-    siteName: siteName.slice(0, 120),
-    language,
-  };
-
-  const content = buildContentModel(homeResponse.body);
-  const jsonLd = extractJsonLd($);
-  const links = extractLinks($, finalUrl);
-  const vision = buildVision({ html: homeResponse.body, title, content });
-  const xRobotsTag = homeResponse.headers["x-robots-tag"]?.trim() || null;
-
-  const classification = classifySite(
-    {
-      finalUrl: finalUrl.toString(),
-      html: homeResponse.body,
-      title,
-      description,
-      ogType,
-      jsonLdTypes: jsonLd.types,
-      sitemapUrls: sitemap.urls,
-      navUrls: links,
-      llmsTxt: llmsResponse.ok && !looksLikeHtml(llmsResponse.body) ? llmsResponse.body : null,
-      hasOpenApi: openApi.found,
-    },
-    { override: options.siteType ?? null },
-  );
-
-  const pillars: AuditPillar[] = [
-    buildDiscoveryPillar({
-      origin,
-      llms: llmsResponse,
-      llmsFull: llmsFullResponse,
-      sitemap,
-      robots,
-      robotsBody: robotsResponse.body,
-    }),
-    buildAccessPillar({
-      origin,
-      robots,
-      robotsResponse,
-      metaRobots,
-      xRobotsTag,
-    }),
-    buildParseabilityPillar(content),
-    buildStructuredPillar({ jsonLd, openApi, wellKnown, classification }),
-  ].map((pillar) => ({ ...pillar, score: scorePillar(pillar) }));
-
-  const score = scoreAudit(pillars);
-  const grade = gradeFor(score);
-
-  const fixes = pillars
-    .flatMap((pillar) =>
-      pillar.checks
-        .filter((entry) => entry.status === "fail" || entry.status === "warn")
-        .map((entry) => ({
-          checkId: entry.id,
-          pillarId: pillar.id,
-          pillarName: pillar.shortName,
-          label: entry.label,
-          status: entry.status,
-          summary: entry.summary,
-          recommendation: entry.recommendation ?? "Review this check and adjust the site.",
-          evidence: entry.evidence,
-          fix: entry.fix,
-          weight: entry.weight,
-        })),
-    )
-    .sort((a, b) => {
-      const rank = (status: CheckStatus) => (status === "fail" ? 0 : status === "warn" ? 1 : 2);
-      if (rank(a.status) !== rank(b.status)) return rank(a.status) - rank(b.status);
-      return b.weight - a.weight;
-    })
-    .slice(0, 8);
-
-  const pages = buildPages(sitemap.urls, links, finalUrl);
-  const files = buildFiles(
-    origin,
-    robotsResponse,
-    llmsResponse,
-    llmsFullResponse,
-    sitemap,
-    openApi,
-    wellKnown,
-  );
-
-  const result: AuditResult = {
-    url: requested.toString(),
-    finalUrl: finalUrl.toString(),
-    domain: profile.domain,
-    score,
-    grade: grade.grade,
-    gradeLabel: grade.label,
-    pillars,
-    classification,
-    profile,
-    pages,
-    files,
-    vision,
-    fixes,
-    meta: {
-      fetchMs: Date.now() - startedAt,
-      pageCount: pages.length,
-      crawledAt: new Date().toISOString(),
-      cached: false,
-    },
-  };
-
-  if (cacheEnabled) writeCache(cacheKey, result);
-  return result;
+  const scope: AuditScope = options.scope === "page" ? "page" : "site";
+  return scope === "page"
+    ? analyzePageScope(requested, options, startedAt)
+    : analyzeSiteScope(requested, options, startedAt);
 }

@@ -46,9 +46,7 @@ export function CoffeeBanner() {
         </div>
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-parchment/15 bg-parchment/[0.04] px-6 py-2.5 font-mono text-[10px] text-parchment/75 sm:px-8">
           <span>GPL-3.0-only · no analytics · no cookies</span>
-          <span className="text-accent-light">
-            all checks run against the initial HTML response
-          </span>
+          <span className="text-accent-light">raw HTML only · no JavaScript execution</span>
         </div>
       </div>
     </section>

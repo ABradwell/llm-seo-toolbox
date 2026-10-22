@@ -7,6 +7,7 @@ import {
   FileText,
   Gauge,
   Github,
+  Layers,
   RefreshCw,
   Terminal,
 } from "lucide-react";
@@ -18,6 +19,7 @@ import { Logo } from "@/components/logo";
 import { QuickAuditBar } from "@/components/landing/quick-audit-bar";
 import { AuditMatrix } from "@/components/workspace/audit-matrix";
 import { LlmsTxtEditor } from "@/components/workspace/llms-txt-editor";
+import { PageResultsTable } from "@/components/workspace/page-results-table";
 import { PipelineLoader } from "@/components/workspace/pipeline-loader";
 import { ScraperSimulator } from "@/components/workspace/scraper-simulator";
 import {
@@ -33,7 +35,8 @@ import { siteConfig } from "@/lib/site";
 import { isSiteType } from "@/lib/site-types";
 import { scoreTone } from "@/lib/score";
 import { prettyDomain } from "@/lib/url";
-import type { AuditApiError, AuditResult } from "@/types/audit";
+import { formatNumber } from "@/lib/utils";
+import type { AuditApiError, AuditResult, AuditScope } from "@/types/audit";
 
 interface WorkspaceError {
   code?: string;
@@ -55,6 +58,7 @@ export function Workspace() {
   const rawUrl = searchParams.get("url")?.trim() ?? "";
   const rawType = searchParams.get("type") ?? "";
   const override = isSiteType(rawType) ? rawType : null;
+  const scope: AuditScope = searchParams.get("scope") === "page" ? "page" : "site";
 
   const [refreshToken, setRefreshToken] = useState(0);
   // The URL whose report the pipeline loader has handed off to. Refreshes and
@@ -67,7 +71,7 @@ export function Workspace() {
     error: null,
   });
 
-  const requestKey = `${rawUrl}::${override ?? "auto"}::${refreshToken}`;
+  const requestKey = `${rawUrl}::${override ?? "auto"}::${scope}::${refreshToken}`;
 
   useEffect(() => {
     if (!rawUrl) return;
@@ -76,7 +80,7 @@ export function Workspace() {
     let active = true;
     const typeQuery = override ? `&type=${encodeURIComponent(override)}` : "";
 
-    fetch(`/api/audit?url=${encodeURIComponent(rawUrl)}${typeQuery}`, {
+    fetch(`/api/audit?url=${encodeURIComponent(rawUrl)}${typeQuery}&scope=${scope}`, {
       signal: controller.signal,
       headers: { accept: "application/json" },
     })
@@ -121,7 +125,7 @@ export function Workspace() {
       active = false;
       controller.abort();
     };
-  }, [rawUrl, override, requestKey]);
+  }, [rawUrl, override, scope, requestKey]);
 
   const settled = fetchState.key === requestKey;
   const sameTarget = fetchState.url === rawUrl;
@@ -147,6 +151,18 @@ export function Workspace() {
     [pathname, rawUrl, router, searchParams],
   );
 
+  const selectScope = useCallback(
+    (next: AuditScope) => {
+      if (!rawUrl || next === scope) return;
+      const params = new URLSearchParams(searchParams.toString());
+      if (next === "site") params.delete("scope");
+      else params.set("scope", "page");
+      setRevealedUrl("");
+      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    },
+    [pathname, rawUrl, router, scope, searchParams],
+  );
+
   return (
     <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-50 border-b border-line bg-background/92 backdrop-blur-md">
@@ -164,7 +180,9 @@ export function Workspace() {
           </div>
           <div className="ml-auto flex items-center gap-1.5">
             {shownAudit ? (
-              <Badge variant={scoreTone(shownAudit.score)}>score {shownAudit.score}</Badge>
+              <Badge variant={scoreTone(shownAudit.score)}>
+                {shownAudit.scope === "site" ? "site" : "page"} {shownAudit.score}
+              </Badge>
             ) : null}
             <Button asChild variant="ghost" size="sm" className="hidden lg:inline-flex">
               <a href={siteConfig.github} target="_blank" rel="noreferrer">
@@ -224,6 +242,39 @@ export function Workspace() {
                   {audit.domain}
                 </h1>
                 <p className="mt-1 line-clamp-1 text-xs text-muted">{audit.profile.title}</p>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <span className="font-mono text-[9px] tracking-[0.14em] text-muted uppercase">
+                    scope
+                  </span>
+                  <div
+                    role="group"
+                    aria-label="Audit scope"
+                    className="flex items-center gap-0.5 rounded-[3px] border border-line bg-panel p-0.5"
+                  >
+                    {(["site", "page"] as const).map((value) => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => selectScope(value)}
+                        aria-pressed={scope === value}
+                        className={
+                          scope === value
+                            ? "rounded-[2px] bg-ink px-2 py-1 font-mono text-[9px] tracking-[0.08em] text-parchment uppercase"
+                            : "rounded-[2px] px-2 py-1 font-mono text-[9px] tracking-[0.08em] text-muted uppercase transition-colors hover:text-foreground"
+                        }
+                      >
+                        {value}
+                      </button>
+                    ))}
+                  </div>
+                  <span className="font-mono text-[9px] text-muted/60">
+                    {audit.scope === "site"
+                      ? `${audit.coverage.analyzedPages}/${audit.coverage.sampleSize} sampled`
+                      : "page scope"}{" "}
+                    · {formatNumber(audit.coverage.inventorySize)} discovered · focus{" "}
+                    {pathOf(audit.focusUrl)}
+                  </span>
+                </div>
               </div>
               {loading ? (
                 <span className="flex items-center gap-1.5 font-mono text-[10px] text-muted">
@@ -232,7 +283,8 @@ export function Workspace() {
                 </span>
               ) : (
                 <span className="font-mono text-[10px] text-muted/60">
-                  {audit.meta.pageCount} pages · {audit.files.filter((file) => file.found).length}{" "}
+                  {audit.coverage.analyzedPages} {audit.scope === "site" ? "sampled" : "page"} ·{" "}
+                  {audit.meta.pageCount} listed · {audit.files.filter((file) => file.found).length}{" "}
                   discovery files
                 </span>
               )}
@@ -251,6 +303,10 @@ export function Workspace() {
                   <Gauge aria-hidden="true" />
                   Audit matrix
                 </TabsTrigger>
+                <TabsTrigger value="pages">
+                  <Layers aria-hidden="true" />
+                  {audit.scope === "site" ? "Sampled pages" : "Page results"}
+                </TabsTrigger>
                 <TabsTrigger value="builder">
                   <FileText aria-hidden="true" />
                   llms.txt editor
@@ -263,6 +319,10 @@ export function Workspace() {
 
               <TabsContent value="audit">
                 <AuditMatrix audit={audit} onRefresh={refresh} refreshing={loading} />
+              </TabsContent>
+
+              <TabsContent value="pages">
+                <PageResultsTable audit={audit} />
               </TabsContent>
 
               <TabsContent value="builder">
@@ -319,7 +379,7 @@ function EmptyState() {
           <QuickAuditBar size="hero" />
         </div>
         <p className="mt-3 font-mono text-[10px] text-muted/60">
-          no browser execution · no database · 30 audits/min per IP
+          no browser execution · no database · 30 credits/min per IP, site audits cost 3
         </p>
       </div>
 
@@ -389,6 +449,15 @@ function ErrorState({ error, onRetry }: { error: WorkspaceError; onRetry: () => 
       </div>
     </div>
   );
+}
+
+function pathOf(value: string): string {
+  try {
+    const url = new URL(value);
+    return `${url.pathname}${url.search}` || "/";
+  } catch {
+    return value;
+  }
 }
 
 function WorkspaceFooter() {

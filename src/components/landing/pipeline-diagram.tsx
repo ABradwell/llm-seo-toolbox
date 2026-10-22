@@ -101,7 +101,7 @@ export function PipelineDiagram() {
             index="01"
             title="Raw site"
             icon={FileText}
-            description="Fetch the initial HTML, manifests and structured data. No browser, no rendering, no guesswork about what a crawler sees."
+            description="Fetch the homepage HTML, manifests and structured data. No browser, no rendering, no guesswork about what a crawler sees."
             tags={["HTML", "/llms.txt", "/robots.txt", "sitemap", "JSON-LD"]}
           />
           <PipelineArrow />

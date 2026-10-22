@@ -1,5 +1,15 @@
 export type CheckStatus = "pass" | "warn" | "fail" | "info";
 
+/** The headline score is for the origin by default; page scope preserves V2. */
+export type AuditScope = "site" | "page";
+
+/** Whether a check runs once per origin or once per sampled page. */
+export type CheckScope = "site" | "page";
+
+export type SamplingMethod = "sitemap" | "links" | "homepage" | "page";
+
+export type PageOutcome = "analyzed" | "unreachable" | "not-html" | "off-origin";
+
 /**
  * V3 compatibility profiles. The classifier picks one from the raw site;
  * the user can override it in the workspace or with `?type=`.
@@ -85,8 +95,18 @@ export interface CheckFix {
   code: string;
 }
 
+export interface PageSampleSummary {
+  /** Pages that produced an observation for this check. */
+  total: number;
+  passed: number;
+  warned: number;
+  failed: number;
+  /** Non-passing page URLs, capped for transport. */
+  affected: string[];
+}
+
 export interface AuditCheck {
-  /** Stable identifier, used for keys, tests and the audit matrix. */
+  /** Stable identifier, used for keys, tests and the live landing checklist. */
   id: string;
   label: string;
   status: CheckStatus;
@@ -104,6 +124,12 @@ export interface AuditCheck {
   fix?: CheckFix;
   /** Relative importance inside its pillar. Defaults to 1. */
   weight: number;
+  /** Whether this check describes the origin or a sampled page. */
+  scope: CheckScope;
+  /** 0–100 for aggregated page checks. Falls back to status points when absent. */
+  score?: number;
+  /** Coverage details for an aggregated page check. */
+  sample?: PageSampleSummary;
 }
 
 export interface AuditPillar {
@@ -133,6 +159,51 @@ export interface AuditPage {
   label: string;
   section: string;
   source: "sitemap" | "link" | "home";
+}
+
+export interface PageAuditResult {
+  url: string;
+  finalUrl: string;
+  label: string;
+  section: string;
+  source: "home" | "sitemap" | "link" | "focus";
+  outcome: PageOutcome;
+  status: "pass" | "warn" | "fail" | "info";
+  /** Weighted average of this page's page-level checks, or null. */
+  score: number | null;
+  grade: AuditGrade | null;
+  checks: AuditCheck[];
+  title: string;
+  textChars: number;
+  snr: number;
+  h1Count: number;
+  headingCount: number;
+  jsonLdTypes: string[];
+  metaRobots: string;
+  xRobotsTag: string | null;
+  error?: string;
+  fetchMs: number;
+}
+
+export interface AuditCoverage {
+  method: SamplingMethod;
+  /** Unique page-like URLs before the display cap. */
+  inventorySize: number;
+  /** URLs included in `pages` for the llms.txt editor. */
+  listedPages: number;
+  /** Pages selected for the sample, including the seed. */
+  sampleSize: number;
+  /** Pages that produced page-level checks. */
+  analyzedPages: number;
+  /** Selected pages that could not be analysed. */
+  failedPages: number;
+  /** Inventory pages not selected because of the cap or deadline. */
+  skippedPages: number;
+  sitemapFound: boolean;
+  homepageFallback: boolean;
+  truncated: boolean;
+  deadlineHit: boolean;
+  note: string;
 }
 
 export interface DiscoveryFile {
@@ -183,18 +254,33 @@ export interface AuditFix {
   recommendation: string;
   evidence?: CheckEvidence;
   fix?: CheckFix;
+  weight: number;
+  scope: CheckScope;
+  sample?: PageSampleSummary;
 }
 
 export interface AuditMeta {
   fetchMs: number;
+  /** Kept for compatibility: the number of URLs in `pages`. */
   pageCount: number;
+  /** Every unique page-like URL found before the display cap. */
+  discoveredPageCount: number;
+  /** Pages that produced page-level checks. */
+  sampledPageCount: number;
   crawledAt: string;
   cached: boolean;
+  siteCached: boolean;
+  focusCached: boolean;
+  scoringVersion: "site-1";
 }
 
 export interface AuditResult {
+  scope: AuditScope;
   url: string;
+  /** The site root after redirects. */
   finalUrl: string;
+  /** The page the user entered after redirects. */
+  focusUrl: string;
   domain: string;
   score: number;
   grade: AuditGrade;
@@ -202,7 +288,13 @@ export interface AuditResult {
   pillars: AuditPillar[];
   classification: SiteClassification;
   profile: SiteProfile;
+  /** Inventory for the llms.txt editor, capped at 80. */
   pages: AuditPage[];
+  /** Pages whose checks feed the site score. */
+  pageResults: PageAuditResult[];
+  /** The entered page, for the page-level drill-down. */
+  focusPage: PageAuditResult;
+  coverage: AuditCoverage;
   files: DiscoveryFile[];
   vision: VisionPayload;
   fixes: AuditFix[];

@@ -7,6 +7,7 @@ import {
   Compass,
   Download,
   ExternalLink,
+  Focus,
   RefreshCw,
   ScanText,
   Bot,
@@ -45,21 +46,34 @@ export function AuditMatrix({
   const counts = countStatuses(audit);
   const grade = gradeFor(audit.score);
   const [issuesOnly, setIssuesOnly] = useState(false);
+  const coverage = audit.coverage;
+  const focusInSample = audit.pageResults.some(
+    (page) =>
+      samePage(page.finalUrl, audit.focusPage.finalUrl) || samePage(page.url, audit.focusUrl),
+  );
 
   return (
     <div className="space-y-4">
       <div className="grid gap-3 xl:grid-cols-[1.3fr_0.7fr]">
         <section className="relative overflow-hidden rounded-[4px] border border-line bg-panel p-4 sm:p-5">
           <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
-            <ScoreRing
-              score={audit.score}
-              size={128}
-              strokeWidth={7}
-              gradeLabel={`grade ${audit.grade}`}
-            />
+            <div className="flex shrink-0 flex-col items-center gap-1.5">
+              <span className="font-mono text-[9px] tracking-[0.16em] text-muted uppercase">
+                {audit.scope === "site" ? "site score" : "page score"}
+              </span>
+              <ScoreRing
+                score={audit.score}
+                size={128}
+                strokeWidth={7}
+                gradeLabel={`grade ${audit.grade}`}
+              />
+            </div>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant={scoreTone(audit.score)}>{grade.label}</Badge>
+                <Badge variant="outline">
+                  {audit.scope === "site" ? "origin-scoped" : "single-page"}
+                </Badge>
                 {audit.meta.cached ? <Badge variant="default">cached</Badge> : null}
                 <Badge variant="outline">{audit.pillars.length} pillars</Badge>
               </div>
@@ -83,6 +97,33 @@ export function AuditMatrix({
                 <span>{audit.meta.crawledAt.replace("T", " ").slice(0, 16)} UTC</span>
                 <span aria-hidden="true">·</span>
                 <span>{(audit.meta.fetchMs / 1000).toFixed(1)}s</span>
+              </p>
+              <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[10px] text-muted">
+                <span className="inline-flex items-center gap-1 text-muted/70">
+                  <Focus className="size-3" aria-hidden="true" />
+                  focus
+                </span>
+                <a
+                  href={audit.focusUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 transition-colors hover:text-accent-strong"
+                >
+                  {pathOf(audit.focusUrl)}
+                  <ExternalLink className="size-2.5" aria-hidden="true" />
+                </a>
+                {audit.scope === "site" ? (
+                  <Badge variant={focusTone(audit.focusPage.status)}>
+                    {audit.focusPage.score ?? "n/a"}/100
+                  </Badge>
+                ) : null}
+                <span className="text-muted/60">
+                  {audit.scope === "site"
+                    ? focusInSample
+                      ? "included in sample"
+                      : "not in site score"
+                    : "scored directly"}
+                </span>
               </p>
             </div>
           </div>
@@ -111,6 +152,35 @@ export function AuditMatrix({
                 </p>
               </div>
             ))}
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line pt-2 font-mono text-[9px] text-muted">
+            <span>
+              {audit.scope === "site" ? (
+                <>
+                  <span className="text-foreground">{formatNumber(coverage.analyzedPages)}</span> /{" "}
+                  {formatNumber(coverage.sampleSize)} sampled pages scored
+                </>
+              ) : (
+                <span className="text-foreground">entered page scored directly</span>
+              )}
+            </span>
+            <span aria-hidden="true">·</span>
+            <span>{formatNumber(coverage.inventorySize)} discovered</span>
+            <span aria-hidden="true">·</span>
+            <span className="uppercase">{coverage.method}</span>
+            {coverage.skippedPages > 0 ? (
+              <>
+                <span aria-hidden="true">·</span>
+                <span>{formatNumber(coverage.skippedPages)} skipped</span>
+              </>
+            ) : null}
+            {coverage.failedPages > 0 ? (
+              <>
+                <span aria-hidden="true">·</span>
+                <span className="text-warn">{formatNumber(coverage.failedPages)} failed</span>
+              </>
+            ) : null}
           </div>
 
           <div className="mt-4 grid gap-2 sm:grid-cols-2">
@@ -190,7 +260,9 @@ export function AuditMatrix({
                         {fix.label}
                       </span>
                       <span className="font-mono text-[9px] text-muted uppercase">
-                        {fix.pillarName}
+                        {fix.sample
+                          ? `${fix.sample.passed}/${fix.sample.total} pages`
+                          : fix.pillarName}
                       </span>
                     </div>
                     <p className="mt-1 line-clamp-2 pl-[22px] text-[11px] leading-relaxed text-muted">
@@ -209,7 +281,10 @@ export function AuditMatrix({
           )}
 
           <p className="mt-auto border-t border-line px-4 py-2 font-mono text-[9px] text-muted/60">
-            {formatNumber(audit.meta.pageCount)} pages discovered · top fixes ranked by severity
+            {audit.scope === "site"
+              ? `${formatNumber(coverage.analyzedPages)} sampled`
+              : "page scope"}{" "}
+            · {formatNumber(audit.meta.pageCount)} listed pages · top fixes ranked by severity
           </p>
         </section>
       </div>
@@ -296,8 +371,8 @@ function PillarMatrix({
                 <th className="w-14 px-4 py-2 font-normal">status</th>
                 <th className="px-3 py-2 font-normal">check</th>
                 <th className="w-40 px-3 py-2 font-normal">protocol</th>
-                <th className="w-32 px-3 py-2 font-normal">source</th>
-                <th className="w-52 px-3 py-2 font-normal">observed</th>
+                <th className="w-36 px-3 py-2 font-normal">source / scope</th>
+                <th className="w-56 px-3 py-2 font-normal">observed</th>
                 <th className="w-20 px-3 py-2 font-normal">action</th>
               </tr>
             </thead>
@@ -354,11 +429,19 @@ function CheckRow({
               <span className="text-accent-strong">:{check.evidence.line}</span>
             ) : null}
           </span>
+          <span className="mt-0.5 block font-mono text-[9px] text-muted/60 uppercase">
+            {check.scope === "page" ? (check.sample ? "sampled page" : "page") : "origin"}
+          </span>
         </td>
         <td className="px-3 py-2.5">
           <span className="line-clamp-2 font-mono text-[10px] text-foreground/80">
             {check.summary}
           </span>
+          {check.sample ? (
+            <span className="mt-0.5 block font-mono text-[9px] text-muted/60">
+              {check.sample.passed}/{check.sample.total} pass · {check.sample.failed} fail
+            </span>
+          ) : null}
         </td>
         <td className="px-3 py-2.5">
           <button
@@ -387,6 +470,35 @@ function CheckRow({
                   <p className="mt-2 border-l-2 border-accent/50 pl-2.5 text-xs leading-relaxed text-muted">
                     {check.recommendation}
                   </p>
+                ) : null}
+                {check.sample ? (
+                  <div className="mt-3 rounded-[3px] border border-line bg-panel px-2.5 py-2">
+                    <p className="font-mono text-[9px] tracking-[0.12em] text-muted uppercase">
+                      sample coverage · score {check.score ?? "—"} · {check.sample.passed}/
+                      {check.sample.total} pass · {check.sample.warned} warn · {check.sample.failed}{" "}
+                      fail
+                    </p>
+                    {check.sample.affected.length > 0 ? (
+                      <p className="mt-1 flex flex-wrap gap-x-2 gap-y-1 font-mono text-[10px]">
+                        <span className="text-muted">affected:</span>
+                        {check.sample.affected.map((url) => (
+                          <a
+                            key={url}
+                            href={url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-accent-strong underline-offset-2 hover:underline"
+                          >
+                            {pathOf(url)}
+                          </a>
+                        ))}
+                      </p>
+                    ) : (
+                      <p className="mt-1 font-mono text-[10px] text-pass">
+                        All sampled pages pass this check.
+                      </p>
+                    )}
+                  </div>
                 ) : null}
                 {check.evidence?.snippet ? (
                   <div className="mt-3 rounded-[2px] border border-line bg-panel px-2.5 py-2">
@@ -428,4 +540,30 @@ function countStatuses(audit: AuditResult): Record<"pass" | "warn" | "fail", num
     for (const check of pillar.checks) counts[check.status] += 1;
   }
   return { pass: counts.pass, warn: counts.warn, fail: counts.fail };
+}
+
+function pathOf(value: string): string {
+  try {
+    const url = new URL(value);
+    return `${url.pathname}${url.search}` || "/";
+  } catch {
+    return value;
+  }
+}
+
+function samePage(a: string, b: string): boolean {
+  try {
+    const left = new URL(a);
+    const right = new URL(b);
+    left.hash = "";
+    right.hash = "";
+    return left.toString() === right.toString();
+  } catch {
+    return false;
+  }
+}
+
+function focusTone(status: CheckStatus): "pass" | "warn" | "fail" | "default" {
+  if (status === "pass" || status === "warn" || status === "fail") return status;
+  return "default";
 }

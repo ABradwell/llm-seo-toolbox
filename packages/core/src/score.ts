@@ -31,7 +31,7 @@ export function scorePillar(pillar: Pick<AuditPillar, "checks">): number {
   let totalWeight = 0;
 
   for (const check of pillar.checks) {
-    const value = statusScore(check.status);
+    const value = check.score ?? statusScore(check.status);
     if (value === null) continue;
     const weight = check.weight > 0 ? check.weight : 1;
     weighted += value * weight;

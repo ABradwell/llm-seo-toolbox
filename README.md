@@ -30,11 +30,11 @@ Audit the four things that decide whether an AI crawler can find, read and class
 
 ## Why this exists
 
-AI answers are assembled from what a crawler can read. If the manifest is missing, `robots.txt` blocks the wrong agent, or the first HTML response is a JavaScript shell, the page does not enter the context window. LLMReady measures that surface in one request and returns the exact source line and a copy-paste fix for every miss.
+AI answers are assembled from what a crawler can read. If the manifest is missing, `robots.txt` blocks the wrong agent, or the first HTML response is a JavaScript shell, the page does not enter the context window. LLMReady measures that surface without rendering the target and returns the exact source line and a copy-paste fix for every miss.
 
-- **Audit** any public URL against 20 checks across four protocol pillars.
+- **Audit** any public URL against 20 checks across four protocol pillars. The default site score belongs to the origin and samples up to eight pages; `scope=page` keeps the original single-page audit.
 - **Author** `/llms.txt` and `/llms-full.txt` from the pages the audit discovered, with live structural validation.
-- **See** the initial HTML next to the markdown an LLM scraper actually reads.
+- **See** the focus page's initial HTML next to the markdown an LLM scraper actually reads.
 
 No accounts, no database, no JavaScript execution against the target site.
 
@@ -46,13 +46,14 @@ A terminal hero with a quick audit bar. Below it, a **three-step pipeline** show
 
 ### Workspace — `/app`
 
-Above the tabs, the **site classification panel** shows the detected profile, confidence, the signals behind it and the compatibility rules it applies. When automatic confidence falls below 30%, the profile title is flagged and every option is shown with its own compact confidence bar. The profile select re-runs the audit with a `type` parameter, so an override is shareable and cached separately from the automatic result.
+Above the tabs, the **site classification panel** shows the detected profile, confidence, the signals behind it and the compatibility rules it applies. When automatic confidence falls below 30%, the profile title is flagged and every option is shown with its own compact confidence bar. The profile select re-runs the audit with a `type` parameter, so an override is shareable and cached separately from the automatic result. A **scope** switch controls whether the score is origin-scoped (the default) or the single-page V2 audit (`scope=page`). Entering a deep link such as `/app/docs/start` sets the focus page for the drill-down; it does not move the site score.
 
-| Tab                   | What it does                                                                                                                                                                                                             |
-| :-------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Audit matrix**      | Score and grade, per-pillar breakdown, every check with pass/warn/fail, the protocol it enforces, the source file and exact line number, a prioritized fix queue, discovery file table, and expandable code-level fixes. |
-| **`llms.txt` editor** | Edit the site name, summary and notes, choose discovered sections, then preview `llms.txt` or `llms-full.txt` with line numbers, live validation and copy/download actions.                                              |
-| **Scraper simulator** | Raw HTML beside the cleaned markdown a non-JS crawler would ingest, with payload reduction, token estimates, stripped-element counts and line numbers on both panes.                                                     |
+| Tab                   | What it does                                                                                                                                                                                                                                                                      |
+| :-------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Audit matrix**      | Site or page score and grade, per-pillar breakdown, every check with pass/warn/fail, the protocol it enforces, the source file and exact line number, sample coverage for aggregated page checks, a prioritized fix queue, discovery file table, and expandable code-level fixes. |
+| **Sampled pages**     | The pages that feed the site score, with per-page status, score, outline, static-text and robots signals. Expand a row for its eight page-level checks. The focus page is shown separately when it was not in the sample.                                                         |
+| **`llms.txt` editor** | Edit the site name, summary and notes, choose discovered sections, then preview `llms.txt` or `llms-full.txt` with line numbers, live validation and copy/download actions.                                                                                                       |
+| **Scraper simulator** | The focus page's raw HTML beside the cleaned markdown a non-JS crawler would ingest, with payload reduction, token estimates, stripped-element counts and line numbers on both panes.                                                                                             |
 
 ## Screenshots
 
@@ -255,7 +256,13 @@ Accepted values are `saas`, `portfolio`, `docs`, `ecommerce`, `local-business` a
 
 ## Scoring model
 
-Each scored check returns **pass**, **warn** or **fail**, worth 100, 50 and 0 points. A pillar score is the weighted average of its checks; the overall score is the mean of the four pillars, so every pillar matters equally. Informational checks do not contribute.
+### Site score vs page score
+
+The default audit is **site-scoped**. The score belongs to the origin, so `/` and `/docs/start` return the same score and the same sample. The engine builds an inventory from the sitemap and homepage links, selects up to **eight pages deterministically** (homepage first, then one page per section before a second page from any section), and runs the eight page-level checks across that sample. The URL you entered becomes the **focus page** for the drill-down, but it is not added to the site score unless the sampler already selected it. If it was selected, its existing result is reused.
+
+Twelve origin-level checks run once: the three discovery files, `robots.txt` reachability and AI policy, the five named-crawler rules, OpenAPI and `.well-known`. The eight page-level checks (meta robots, `X-Robots-Tag`, H1, heading order, SNR, SSR payload, JSON-LD and profile schema) are aggregated by the **mean of their status points** across analyzed pages. Seven of eight pages passing is `87.5 → 88`, so the aggregate is a warning, not a 50-point binary warning. Site scope is the default; `scope=page` restores the V2 single-page hybrid audit, where the entered page's checks are scored directly.
+
+Each scored check returns **pass**, **warn** or **fail**, worth 100, 50 and 0 points. A pillar score is the weighted average of its checks; the overall score is the mean of the four pillars, so every pillar matters equally. Informational checks do not contribute. Aggregated page checks carry their mean score in `check.score`; the displayed status uses ≥ 90 pass, ≥ 50 warn, otherwise fail.
 
 | Grade | Score  | Label             |
 | :---- | :----- | :---------------- |
@@ -267,6 +274,8 @@ Each scored check returns **pass**, **warn** or **fail**, worth 100, 50 and 0 po
 
 ### 1. Discovery & Manifests
 
+These three checks are **origin-level** and run once per audit.
+
 | Check           | Weight | Passing means                                                                                                                                                           |
 | :-------------- | :----- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `llms.txt`      | 3      | Served as plain text at the root, with one H1, a summary and a markdown link index. Structural errors are reported.                                                     |
@@ -277,17 +286,21 @@ Every issue carries a 1-based line number from the fetched response, so the matr
 
 ### 2. Crawler Access Rules
 
+`robots.txt` reachability, the explicit AI policy and the five named-crawler rules are **origin-level**. The robots meta tag and `X-Robots-Tag` are **page-level**: each sampled page is checked, then the results are aggregated.
+
 | Check                                                                   | Weight | Passing means                                                                    |
 | :---------------------------------------------------------------------- | :----- | :------------------------------------------------------------------------------- |
 | `robots.txt` reachable                                                  | 1      | The file is served and parses into user-agent groups. A missing file warns.      |
 | Explicit AI user-agent policy                                           | 1      | At least one AI crawler is named in its own group, making intent auditable.      |
-| `GPTBot`, `ClaudeBot`, `Google-Extended`, `PerplexityBot`, `Bytespider` | 2 each | No matching rule blocks the audited path (`/`).                                  |
-| `robots` meta directives                                                | 1      | No `noindex` or `none` on the page.                                              |
+| `GPTBot`, `ClaudeBot`, `Google-Extended`, `PerplexityBot`, `Bytespider` | 2 each | No matching rule blocks the origin root (`/`).                                   |
+| `robots` meta directives                                                | 1      | No `noindex` or `none` on the page. Aggregated across the sample.                |
 | `X-Robots-Tag` header                                                   | 2      | The response does not send a blocking header; scoped restrictions are evaluated. |
 
-RFC 9309 matching is implemented directly: the longest matching path wins, `Allow` wins ties, and both `*` and `$` syntax are supported. Blocking all agents with a wildcard `Disallow: /` is reported per vendor.
+RFC 9309 matching is implemented directly: the longest matching path wins, `Allow` wins ties, and both `*` and `$` syntax are supported. Blocking all agents with a wildcard `Disallow: /` is reported per vendor. Crawler rules are origin-level and evaluated once against `/`; per-page access is covered by the aggregated `robots` meta and `X-Robots-Tag` checks.
 
 ### 3. Static Parseability
+
+All four checks are **page-level**. In site scope they are aggregated across the sample; in `scope=page` they score the entered page directly.
 
 | Check                   | Weight | Passing means                                                                                         |
 | :---------------------- | :----- | :---------------------------------------------------------------------------------------------------- |
@@ -302,6 +315,8 @@ The content region is `main`, else `[role="main"]`, else the richest `article`, 
 
 ### 4. Structured Machine Interfaces
 
+JSON-LD and the profile schema are **page-level** and aggregated across the sample. OpenAPI and `.well-known` discovery are **origin-level** and run once.
+
 | Check                   | Weight | Passing means                                                                                                                  |
 | :---------------------- | :----- | :----------------------------------------------------------------------------------------------------------------------------- |
 | JSON-LD presence/syntax | 2.5    | At least one `application/ld+json` block parses, with `@context`/`@type` when present.                                         |
@@ -313,15 +328,21 @@ The content region is `main`, else `[role="main"]`, else the richest `article`, 
 
 ```http
 GET /api/audit?url=example.com
+GET /api/audit?url=example.com/docs/start
+GET /api/audit?url=example.com&scope=page
 GET /api/audit?url=example.com&type=docs
 ```
 
-`url` accepts a bare domain or a full URL; missing schemes default to `https://`. `type` is optional and pins the site profile instead of using automatic classification.
+`url` accepts a bare domain or a full URL; missing schemes default to `https://`. `scope` is `site` by default and samples up to eight pages from the origin. Pass `scope=page` for the single-page V2 audit. `type` is optional and pins the site profile instead of using automatic classification.
+
+The site score is origin-scoped: `finalUrl` is the site root, `focusUrl` is the page you entered, and `pageResults` holds the sampled pages that produced the score. The focus page is returned separately as `focusPage`; it only contributes to the score when the deterministic sample includes it. `coverage` explains the inventory, sample and any failures or deadline truncation.
 
 ```jsonc
 {
-  "url": "https://example.com/",
-  "finalUrl": "https://example.com/en/",
+  "scope": "site",
+  "url": "https://example.com/docs/start",
+  "finalUrl": "https://example.com/",
+  "focusUrl": "https://example.com/docs/start",
   "domain": "example.com",
   "score": 78,
   "grade": "B",
@@ -373,12 +394,56 @@ GET /api/audit?url=example.com&type=docs
             "snippet": "# Example Docs",
           },
           "weight": 3,
+          "scope": "site",
         },
       ],
     },
   ],
   "profile": { "title": "…", "description": "…", "siteName": "…", "language": "en" },
   "pages": [{ "url": "…", "label": "Docs", "section": "Docs", "source": "sitemap" }],
+  "pageResults": [
+    {
+      "url": "https://example.com/",
+      "finalUrl": "https://example.com/",
+      "label": "Home",
+      "section": "Home",
+      "source": "home",
+      "outcome": "analyzed",
+      "status": "pass",
+      "score": 94,
+      "grade": "A",
+      "checks": [{ "id": "h1", "status": "pass", "scope": "page" }],
+      "title": "Example",
+      "textChars": 1840,
+      "snr": 0.82,
+      "h1Count": 1,
+      "headingCount": 9,
+      "jsonLdTypes": ["SoftwareApplication"],
+      "metaRobots": "",
+      "xRobotsTag": null,
+    },
+  ],
+  "focusPage": {
+    "url": "https://example.com/docs/start",
+    "finalUrl": "https://example.com/docs/start",
+    "outcome": "analyzed",
+    "score": 89,
+    "source": "focus",
+  },
+  "coverage": {
+    "method": "sitemap",
+    "inventorySize": 146,
+    "listedPages": 80,
+    "sampleSize": 8,
+    "analyzedPages": 8,
+    "failedPages": 0,
+    "skippedPages": 138,
+    "sitemapFound": true,
+    "homepageFallback": false,
+    "truncated": true,
+    "deadlineHit": false,
+    "note": "Analyzed 8 of 146 pages from the sitemap.",
+  },
   "files": [
     {
       "id": "robots-txt",
@@ -413,13 +478,27 @@ GET /api/audit?url=example.com&type=docs
       "recommendation": "Add a JSON-LD block with @context and @type…",
       "evidence": { "file": "/", "line": null, "snippet": null },
       "fix": { "language": "json", "code": "{ \"@context\": \"https://schema.org\" }" },
+      "weight": 2,
+      "scope": "page",
+      "sample": {
+        "total": 8,
+        "passed": 3,
+        "warned": 1,
+        "failed": 4,
+        "affected": ["https://example.com/", "https://example.com/pricing"],
+      },
     },
   ],
   "meta": {
     "fetchMs": 1420,
     "pageCount": 80,
+    "discoveredPageCount": 146,
+    "sampledPageCount": 8,
     "crawledAt": "2026-01-01T00:00:00.000Z",
     "cached": false,
+    "siteCached": false,
+    "focusCached": false,
+    "scoringVersion": "site-1",
   },
 }
 ```
@@ -433,18 +512,20 @@ Errors are returned as `{ "error": { "code", "message", "hint?" } }`.
 | 400    | `missing_url`       | No `url` query parameter.                                              |
 | 400    | `invalid_url`       | The URL is longer than 2048 characters.                                |
 | 400    | `invalid_site_type` | `type` is not one of the six accepted profile ids.                     |
+| 400    | `invalid_scope`     | `scope` is not `site` or `page`.                                       |
 | 400    | `blocked_url`       | Private, loopback or reserved host, or an unsafe redirect target.      |
 | 415    | `not_html`          | The URL returned something that is not an HTML page.                   |
-| 429    | `rate_limited`      | More than 30 audits per minute from one IP (`retry-after` is set).     |
+| 429    | `rate_limited`      | The weighted 30-credit minute is exhausted (`retry-after` is set).     |
 | 500    | `internal_error`    | Unexpected failure.                                                    |
 | 502    | `fetch_failed`      | Timeout, DNS failure or connection error.                              |
 | 502    | `http_error`        | The target answered with 4xx/5xx (`403` usually means bot protection). |
 
 Behaviour notes:
 
-- **Cache:** identical URLs and profile overrides are memoized for 5 minutes per server instance (`meta.cached` tells you which one you got, and `x-audit-cache` repeats it as a header).
-- **Rate limit:** 30 requests per minute per IP, sliding window, in memory.
-- **Duration:** the route declares `maxDuration = 60`; audits usually finish in 1–3 seconds.
+- **Cache:** the audit engine keeps three cache entries, all held for 5 minutes per server instance: the origin base (classification, discovery, inventory and sampled results), the focus page, and a page-scope result. `meta.siteCached` and `meta.focusCached` show which parts were reused; `meta.cached` is true only when the whole request was a hit, and `x-audit-cache` repeats that as a header.
+- **Rate limit:** a shared 30-credit window per IP, sliding in memory. A page audit costs 1 credit and a site audit costs 3, because it fetches and analyzes a sample. Denied requests do not consume credits.
+- **Duration:** the route declares `maxDuration = 60`. The sampler uses eight pages, concurrency 4, a 6-second per-page timeout and a 25-second sampling deadline. Page scope usually returns in a few seconds; a full site sample usually finishes well inside the function limit.
+- **Scope header:** `x-audit-scope` repeats the effective `site` or `page` value on every successful response.
 - **User agent:** `LLMReadyBot/0.1 (+https://github.com/ABradwell/llm-seo-toolbox; automated LLM-readiness audit)`.
 
 ### Discovery surface
@@ -463,12 +544,16 @@ The deployment practices what it audits. These files are generated from the same
 
 1. **Validate the target.** Only `http`/`https` on ports 80/443. The hostname is resolved and checked against loopback, private, link-local, multicast and reserved ranges (IPv4 and IPv6), plus blocked TLDs such as `.local` and `.internal`.
 2. **Fetch politely.** Redirects are followed manually (max 5) and every hop is re-validated, so a public host cannot bounce the request into your network. Responses are capped by byte ceiling and timeout, `no-store`, with a descriptive user agent.
-3. **Read the discovery surface.** `robots.txt`, `llms.txt`, `llms-full.txt`, `sitemap.xml` (indexes are expanded, with a fetch budget), `/openapi.json`, `/.well-known/security.txt` and `/.well-known/ai-plugin.json` — concurrently.
-4. **Validate the manifests.** `llms.txt` is parsed for one H1, a blockquote summary, H2 sections, markdown links and pagination markers. Invalid files fail; missing optional files warn.
-5. **Parse access.** RFC 9309 groups are matched per AI user agent, including wildcard and end-anchor paths. `X-Robots-Tag` and `robots` meta directives are evaluated separately from the file.
-6. **Model the content.** Scripts, styles, SVGs, forms, frames, navigation, banners and hidden nodes are stripped. The content region drives the heading outline, SNR, SSR check and evidence line numbers.
-7. **Classify the site.** Hostname, sitemap and navigation paths, JSON-LD, `og:type`, copy, markup and `llms.txt` vote for one of six profiles — no extra requests. The winning profile sets expected schema types and whether OpenAPI is scored.
-8. **Build the LLM view.** The cleaned region is converted to markdown for the simulator and the `llms-full.txt` draft, then the score and prioritized fix queue are assembled.
+3. **Anchor the site.** The site root is the seed for a site audit. If the root does not return HTML and the user entered a deeper page, that page replaces the seed and `coverage.homepageFallback` records it.
+4. **Read the discovery surface.** `robots.txt`, `llms.txt`, `llms-full.txt`, `sitemap.xml` (indexes are expanded, with a fetch budget), `/openapi.json`, `/.well-known/security.txt` and `/.well-known/ai-plugin.json` — concurrently.
+5. **Validate the manifests.** `llms.txt` is parsed for one H1, a blockquote summary, H2 sections, markdown links and pagination markers. Invalid files fail; missing optional files warn.
+6. **Build the inventory.** Sitemap URLs come first, then same-origin homepage links that look like pages. Navigation query strings, asset extensions and utility prefixes are filtered. The editor keeps the first 80 URLs; `coverage.inventorySize` records the full count.
+7. **Select the sample.** The homepage is always included. The rest are picked deterministically one per section before a second page from any section, up to eight pages. **Focus selection never reads the URL the user entered**, so `/` and `/docs/start` produce the same sample.
+8. **Classify the site.** Hostname, sitemap and navigation paths, JSON-LD, `og:type`, copy, markup and `llms.txt` vote for one of six profiles — no extra requests. The winning profile sets expected schema types and whether OpenAPI is scored.
+9. **Analyze the sample.** Page-level checks run with concurrency 4, a 6-second per-page timeout and a 25-second sampling deadline. Failed pages stay in `pageResults` with an outcome, but do not contribute observations to the aggregate.
+10. **Resolve the focus page.** If it was selected, its sampled result is reused. Otherwise it gets a separate drill-down fetch, which can fail without affecting the site score. `focusPage` always represents the entered page.
+11. **Aggregate and score.** Origin checks run once; page checks are averaged by status points, then the four pillars and prioritized fix queue are assembled. `scope=page` skips sampling and scores the entered page directly.
+12. **Build the LLM view.** The focus page's cleaned content becomes the simulator markdown and the `llms-full.txt` draft source.
 
 Because nothing is rendered in a browser, the audit reports what is **in the initial HTML response** — exactly what a non-JS crawler sees. Client-rendered content is reported as such rather than silently scored as missing.
 
@@ -478,8 +563,20 @@ Because nothing is rendered in a browser, the audit reports what is **in the ini
 .
 ├── .github/workflows/       # CI: format, lint, typecheck, tests, build, secret scan
 ├── .husky/pre-commit        # lint-staged + gitleaks
+├── actions/audit/           # GitHub Action wrapper with thresholds and PR comments
 ├── gameplans/               # Product & architecture specification
-├── public/                  # Static assets
+├── packages/
+│   ├── core/                # Shared audit engine used by the web app, CLI and action
+│   │   └── src/
+│   │       ├── analyzer.ts  # Scope-aware orchestration, caches and 20 check builders
+│   │       ├── sampling.ts  # Inventory, deterministic sample, bounded concurrency
+│   │       ├── page-audit.ts # Per-page extraction and eight page-level checks
+│   │       ├── aggregate.ts # Mean-status aggregation for page-level checks
+│   │       ├── classifier.ts# V3 site-profile classifier and confidence scoring
+│   │       ├── score.ts     # Weighting and grades
+│   │       └── …            # Content, directives, robots, sitemap, security
+│   └── cli/                 # llm-seo-toolbox command-line wrapper
+├── public/                  # Static assets and machine-readable docs
 └── src/
     ├── app/
     │   ├── page.tsx         # Landing: terminal hero, pipeline, CLI + action install
@@ -489,29 +586,21 @@ Because nothing is rendered in a browser, the audit reports what is **in the ini
     │   └── globals.css      # Tailwind v4 zinc theme, 4px radius scale
     ├── components/
     │   ├── landing/         # Terminal hero, pipeline, CLI + action install, header/footer
-    │   ├── workspace/       # Classification panel, audit matrix, llms.txt editor, simulator
+    │   ├── workspace/       # Classification, audit matrix, sampled pages, editor, simulator
     │   └── ui/              # Low-radius shadcn-style primitives
-    ├── lib/
-    │   ├── analyzer.ts      # Audit orchestration, 20 check builders
-    │   ├── classifier.ts    # V3 site-profile classifier and confidence scoring
-    │   ├── content.ts       # Content scope, SNR, headings, source lines
-    │   ├── directives.ts    # X-Robots-Tag and robots meta evaluation
-    │   ├── fetch-page.ts    # SSRF-safe fetcher with response headers
-    │   ├── llms-txt.ts      # llms.txt structural validator
-    │   ├── llms.ts          # llms.txt generation & page grouping
-    │   ├── robots.ts        # RFC 9309 parsing, line numbers, AI policy
-    │   ├── sitemap.ts       # sitemap & XML parsing
-    │   ├── security.ts      # URL validation & DNS checks
-    │   ├── score.ts         # Weighting and grades
-    │   ├── samples.ts       # Functional standard presets
-    │   ├── site-types.ts    # Six profile definitions and helpers
-    │   └── rate-limit.ts    # Per-IP audit budget
-    └── types/audit.ts       # Shared audit types, evidence and fixes
+    ├── lib/                 # Thin core re-exports plus web-only helpers
+    │   ├── analyzer.ts      # Re-export of @llm-seo-toolbox/core
+    │   ├── score.ts         # Re-export of core scoring
+    │   ├── sitemap.ts       # Re-export of core sitemap helpers
+    │   └── …                # Rate limit, pipeline copy, presets, utilities
+    └── types/audit.ts       # Re-export of core audit types
 ```
 
 ## Testing
 
-`pnpm test` runs the Vitest suite over the pure helpers — RFC 9309 parsing and agent decisions with source lines, sitemap parsing and index expansion, SSRF validation, scoring, `llms.txt` validation, directive evaluation, site classification, and the content model (scope selection, chrome removal, heading lines, SNR) — on fixtures, with no network access.
+`pnpm test` runs the Vitest suite over the pure helpers and the orchestration path — RFC 9309 parsing and agent decisions with source lines, sitemap parsing and index expansion, SSRF validation, scoring, `llms.txt` validation, directive evaluation, site classification, and the content model (scope selection, chrome removal, heading lines, SNR) — on fixtures, with no network access.
+
+The site-scoped suite also covers deterministic stratified sampling, bounded concurrency, mean-status aggregation (`7/8` pass becomes `88` / warn), per-page extraction, weighted rate-limit costs, the 14-step pipeline copy, and a full `analyzeSite` run with mocked fetches that proves `/` and `/docs/app` return the same sample and site score while resolving different focus pages.
 
 Live audits are not part of the suite. To check the engine against real sites, run `pnpm start` and request `/api/audit?url=…`, or use the standard presets in the workspace.
 
@@ -534,7 +623,7 @@ Options: `--base-url`, `--out`, `--audit-url`, `--chrome` (or `CHROME_PATH`), `-
 Notes for production deployments:
 
 - The rate limiter and audit cache live in instance memory. That is fine for a public demo; for stricter global limits, back them with Vercel KV/Upstash Redis and a shared cache.
-- The audit route needs a serverless function timeout of a few seconds; keep `maxDuration = 60` where the plan allows it.
+- The audit route samples up to eight pages, so keep a serverless function timeout of at least 30 seconds where the plan allows it; the route declares `maxDuration = 60`.
 - Because the endpoint fetches arbitrary public URLs on demand, keep it on a plan with abuse protections and consider adding a WAF rule or origin allowlist if you run it at scale.
 
 ## Code quality & security tooling
