@@ -6,7 +6,7 @@ interface TerminalLine {
 }
 
 const LINES: TerminalLine[] = [
-  { kind: "command", text: "$ llmready scan https://nextjs.org/docs" },
+  { kind: "command", text: "$ pnpm cli https://nextjs.org/docs" },
   { kind: "pass", text: "GET /llms.txt            200  H1 + 142 markdown links" },
   { kind: "pass", text: "GET /llms-full.txt       200  1.8 MB unpaginated bundle" },
   { kind: "pass", text: "GET /robots.txt          200  GPTBot allow · ClaudeBot allow" },

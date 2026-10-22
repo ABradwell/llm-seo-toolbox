@@ -1,9 +1,10 @@
+import { ActionSection } from "@/components/landing/action-section";
+import { CliSection } from "@/components/landing/cli-section";
 import { CoffeeBanner } from "@/components/landing/coffee-banner";
 import { CrawlerStrip } from "@/components/landing/crawler-strip";
 import { SiteFooter } from "@/components/landing/footer";
 import { PipelineDiagram } from "@/components/landing/pipeline-diagram";
 import { SiteHeader } from "@/components/landing/site-header";
-import { SpecChecklist } from "@/components/landing/spec-checklist";
 import { TerminalHero } from "@/components/landing/terminal-hero";
 import { siteConfig, siteUrl } from "@/lib/site";
 
@@ -33,7 +34,8 @@ export default function HomePage() {
         <TerminalHero />
         <PipelineDiagram />
         <CrawlerStrip />
-        <SpecChecklist />
+        <CliSection />
+        <ActionSection />
         <CoffeeBanner />
       </main>
       <SiteFooter />
