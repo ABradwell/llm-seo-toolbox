@@ -45,16 +45,12 @@ jobs:
           VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
           VERCEL_TEAM_ID: ${{ vars.VERCEL_TEAM_ID }}
           VERCEL_TEAM_SLUG: ${{ vars.VERCEL_TEAM_SLUG || 'bradwell-applications' }}
+          VERCEL_TARGET: ${{ github.event_name == 'pull_request' && 'preview' || 'production' }}
+          AUDIT_URL: ${{ vars.LLM_SEO_TOOLBOX_AUDIT_URL || 'https://llm-seo-toolbox.vercel.app' }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          VERCEL_PREVIEW_TIMEOUT_SECONDS: ${{ vars.VERCEL_PREVIEW_TIMEOUT_SECONDS || '600' }}
-          VERCEL_PREVIEW_POLL_SECONDS: ${{ vars.VERCEL_PREVIEW_POLL_SECONDS || '10' }}
-        run: |
-          if [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
-            echo "url=${{ vars.LLM_SEO_TOOLBOX_AUDIT_URL || 'https://llm-seo-toolbox.vercel.app' }}" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          node scripts/vercel-preview-url.mjs
+          VERCEL_DEPLOYMENT_TIMEOUT_SECONDS: ${{ vars.VERCEL_DEPLOYMENT_TIMEOUT_SECONDS || '600' }}
+          VERCEL_DEPLOYMENT_POLL_SECONDS: ${{ vars.VERCEL_DEPLOYMENT_POLL_SECONDS || '10' }}
+        run: node scripts/vercel-audit-target.mjs
 
       - name: Verify preview access
         if: github.event_name == 'pull_request'

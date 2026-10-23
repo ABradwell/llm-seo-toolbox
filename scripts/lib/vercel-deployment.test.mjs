@@ -1,10 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import {
-  buildDeploymentsUrl,
-  pickPreviewDeployment,
-  resolvePreviewDeployment,
-} from "./vercel-preview.mjs";
+import { buildDeploymentsUrl, pickDeployment, resolveDeployment } from "./vercel-deployment.mjs";
 
 function ready(overrides = {}) {
   return {
@@ -22,6 +18,19 @@ function ready(overrides = {}) {
     },
     ...overrides,
   };
+}
+
+function production(overrides = {}) {
+  return ready({
+    uid: "dpl_production",
+    url: "llm-seo-toolbox-prod-bradwell-applications.vercel.app",
+    target: "production",
+    meta: {
+      ...ready().meta,
+      githubCommitRef: "main",
+    },
+    ...overrides,
+  });
 }
 
 function jsonResponse(body, { ok = true, status = 200, statusText = "OK" } = {}) {
@@ -93,13 +102,13 @@ describe("buildDeploymentsUrl", () => {
   });
 });
 
-describe("pickPreviewDeployment", () => {
+describe("pickDeployment", () => {
   it("picks the newest preview for the repository and branch", () => {
     const deployments = [
       ready({ uid: "old", created: 100 }),
       ready({ uid: "new", created: 300 }),
       ready({ uid: "middle", created: 200 }),
-      ready({ uid: "production", created: 400, target: "production" }),
+      production({ uid: "production", created: 400 }),
       ready({
         uid: "other-repo",
         created: 500,
@@ -114,7 +123,7 @@ describe("pickPreviewDeployment", () => {
     ];
 
     expect(
-      pickPreviewDeployment(deployments, { repoName: "llm-seo-toolbox", branch: "feat/preview" }),
+      pickDeployment(deployments, { repoName: "llm-seo-toolbox", branch: "feat/preview" }),
     ).toMatchObject({ uid: "new" });
   });
 
@@ -129,7 +138,7 @@ describe("pickPreviewDeployment", () => {
     ];
 
     expect(
-      pickPreviewDeployment(deployments, {
+      pickDeployment(deployments, {
         repoName: "llm-seo-toolbox",
         branch: "feat/preview",
         headSha: "abc1234",
@@ -141,7 +150,7 @@ describe("pickPreviewDeployment", () => {
     const deployments = [ready({ meta: { ...ready().meta, githubCommitSha: "older" } })];
 
     expect(
-      pickPreviewDeployment(deployments, {
+      pickDeployment(deployments, {
         repoName: "llm-seo-toolbox",
         branch: "feat/preview",
         headSha: "abc1234",
@@ -149,17 +158,33 @@ describe("pickPreviewDeployment", () => {
     ).toBeNull();
   });
 
+  it("selects the production deployment for a main commit", () => {
+    const deployments = [
+      ready({ uid: "preview", target: null, meta: { ...ready().meta, githubCommitRef: "main" } }),
+      production({ uid: "production", created: 50 }),
+    ];
+
+    expect(
+      pickDeployment(deployments, {
+        repoName: "llm-seo-toolbox",
+        branch: "main",
+        headSha: "abc1234",
+        target: "production",
+      }),
+    ).toMatchObject({ uid: "production" });
+  });
+
   it("ignores malformed responses", () => {
-    expect(pickPreviewDeployment(null, { repoName: "repo", branch: "main" })).toBeNull();
-    expect(pickPreviewDeployment([], { repoName: "repo", branch: "main" })).toBeNull();
+    expect(pickDeployment(null, { repoName: "repo", branch: "main" })).toBeNull();
+    expect(pickDeployment([], { repoName: "repo", branch: "main" })).toBeNull();
   });
 });
 
-describe("resolvePreviewDeployment", () => {
-  it("returns a ready deployment", async () => {
+describe("resolveDeployment", () => {
+  it("returns a ready preview deployment", async () => {
     const { fetchImpl } = harness([jsonResponse({ deployments: [ready()] })]);
 
-    const result = await resolvePreviewDeployment({
+    const result = await resolveDeployment({
       ...baseOptions,
       ...clocked(),
       fetchImpl,
@@ -170,8 +195,27 @@ describe("resolvePreviewDeployment", () => {
       id: "dpl_ready",
       state: "READY",
       branchAlias: "https://llm-seo-toolbox-git-feat-preview-bradwell-applications.vercel.app",
+      target: "preview",
     });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns a ready production deployment", async () => {
+    const { fetchImpl } = harness([jsonResponse({ deployments: [production()] })]);
+
+    const result = await resolveDeployment({
+      ...baseOptions,
+      branch: "main",
+      target: "production",
+      ...clocked(),
+      fetchImpl,
+    });
+
+    expect(result).toMatchObject({
+      url: "https://llm-seo-toolbox-prod-bradwell-applications.vercel.app",
+      id: "dpl_production",
+      target: "production",
+    });
   });
 
   it("polls while the deployment is building", async () => {
@@ -181,7 +225,7 @@ describe("resolvePreviewDeployment", () => {
       jsonResponse({ deployments: [ready()] }),
     ]);
 
-    const result = await resolvePreviewDeployment({
+    const result = await resolveDeployment({
       ...baseOptions,
       ...clocked(),
       fetchImpl,
@@ -199,7 +243,7 @@ describe("resolvePreviewDeployment", () => {
       jsonResponse({ deployments: [older, ready()] }),
     ]);
 
-    const result = await resolvePreviewDeployment({
+    const result = await resolveDeployment({
       ...baseOptions,
       ...clocked(),
       fetchImpl,
@@ -218,17 +262,17 @@ describe("resolvePreviewDeployment", () => {
     });
     const { fetchImpl } = harness([jsonResponse({ deployments: [failed] })]);
 
-    await expect(
-      resolvePreviewDeployment({ ...baseOptions, ...clocked(), fetchImpl }),
-    ).rejects.toThrow(/Build failed/);
+    await expect(resolveDeployment({ ...baseOptions, ...clocked(), fetchImpl })).rejects.toThrow(
+      /Build failed/,
+    );
   });
 
-  it("times out when no preview appears", async () => {
+  it("times out when no deployment appears", async () => {
     const { fetchImpl } = harness([jsonResponse({ deployments: [] })]);
 
-    await expect(
-      resolvePreviewDeployment({ ...baseOptions, ...clocked(), fetchImpl }),
-    ).rejects.toThrow(/Timed out after 1s/);
+    await expect(resolveDeployment({ ...baseOptions, ...clocked(), fetchImpl })).rejects.toThrow(
+      /Timed out after 1s/,
+    );
   });
 
   it("does not retry a 403 and explains the team scope", async () => {
@@ -239,9 +283,9 @@ describe("resolvePreviewDeployment", () => {
       ),
     ]);
 
-    await expect(
-      resolvePreviewDeployment({ ...baseOptions, ...clocked(), fetchImpl }),
-    ).rejects.toThrow(/VERCEL_TEAM_ID/);
+    await expect(resolveDeployment({ ...baseOptions, ...clocked(), fetchImpl })).rejects.toThrow(
+      /VERCEL_TEAM_ID/,
+    );
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
@@ -254,7 +298,7 @@ describe("resolvePreviewDeployment", () => {
       jsonResponse({ deployments: [ready()] }),
     ]);
 
-    const result = await resolvePreviewDeployment({
+    const result = await resolveDeployment({
       ...baseOptions,
       ...clocked(),
       fetchImpl,
@@ -266,7 +310,18 @@ describe("resolvePreviewDeployment", () => {
 
   it("requires a token", async () => {
     await expect(
-      resolvePreviewDeployment({ ...baseOptions, token: "", ...clocked(), fetchImpl: vi.fn() }),
+      resolveDeployment({ ...baseOptions, token: "", ...clocked(), fetchImpl: vi.fn() }),
     ).rejects.toThrow(/VERCEL_TOKEN/);
+  });
+
+  it("rejects an unknown target", async () => {
+    await expect(
+      resolveDeployment({
+        ...baseOptions,
+        target: "staging",
+        ...clocked(),
+        fetchImpl: vi.fn(),
+      }),
+    ).rejects.toThrow(/preview or production/);
   });
 });

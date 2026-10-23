@@ -1,5 +1,5 @@
 /**
- * Resolve the Vercel preview deployment for a Git branch.
+ * Resolve a Vercel deployment for a Git branch.
  *
  * The Vercel deployments API lists newest first, but a build may still be
  * queued or running when the workflow starts. This module polls until the
@@ -14,6 +14,7 @@ const USER_AGENT = "llm-seo-toolbox-ci (+https://github.com/ABradwell/llm-seo-to
 
 const IN_PROGRESS_STATES = new Set(["QUEUED", "INITIALIZING", "BUILDING"]);
 const FAILED_STATES = new Set(["ERROR", "CANCELED", "BLOCKED", "DELETED"]);
+const TARGETS = new Set(["preview", "production"]);
 
 export class VercelApiError extends Error {
   constructor(message, { status = 0, retryable = false } = {}) {
@@ -53,17 +54,24 @@ export function buildDeploymentsUrl({
 }
 
 /**
- * Picks the deployment for the requested repository, branch and commit.
- * Production deployments are excluded; this resolver is for previews only.
+ * Picks the deployment for the requested repository, branch, commit and target.
+ * Preview mode excludes production deployments; production mode requires one.
  */
-export function pickPreviewDeployment(deployments, { repoName, branch, headSha } = {}) {
+export function pickDeployment(
+  deployments,
+  { repoName, branch, headSha, target = "preview" } = {},
+) {
   if (!Array.isArray(deployments)) return null;
 
   const matches = deployments.filter((deployment) => {
     const meta = deployment?.meta ?? {};
     if (meta.githubCommitRepo !== repoName) return false;
     if (meta.githubCommitRef !== branch) return false;
-    if (deployment?.target === "production") return false;
+    if (target === "production") {
+      if (deployment?.target !== "production") return false;
+    } else if (deployment?.target === "production") {
+      return false;
+    }
     if (!deployment?.url) return false;
     return true;
   });
@@ -158,10 +166,10 @@ function deploymentUrl(deployment) {
 }
 
 /**
- * Polls the Vercel API until the preview deployment for `headSha` (or the
- * newest deployment on `branch` when no SHA is given) is READY.
+ * Polls the Vercel API until the deployment for `headSha` (or the newest
+ * deployment on `branch` when no SHA is given) is READY.
  */
-export async function resolvePreviewDeployment({
+export async function resolveDeployment({
   token,
   projectId,
   teamId,
@@ -169,6 +177,7 @@ export async function resolvePreviewDeployment({
   repoName,
   branch,
   headSha,
+  target = "preview",
   apiUrl = DEFAULT_API_URL,
   limit = DEFAULT_LIMIT,
   timeoutMs = DEFAULT_TIMEOUT_MS,
@@ -178,10 +187,10 @@ export async function resolvePreviewDeployment({
   now = Date.now,
   log = (message) => console.log(message),
 } = {}) {
-  if (!token) throw new Error("VERCEL_TOKEN is required to resolve the preview deployment.");
-  if (!repoName)
-    throw new Error("A repository name is required to resolve the preview deployment.");
-  if (!branch) throw new Error("A Git branch is required to resolve the preview deployment.");
+  if (!token) throw new Error("VERCEL_TOKEN is required to resolve the deployment.");
+  if (!repoName) throw new Error("A repository name is required to resolve the deployment.");
+  if (!branch) throw new Error("A Git branch is required to resolve the deployment.");
+  if (!TARGETS.has(target)) throw new Error("target must be preview or production.");
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
     throw new Error("timeoutMs must be a positive number.");
   }
@@ -189,6 +198,7 @@ export async function resolvePreviewDeployment({
     throw new Error("intervalMs must be a positive number.");
   }
 
+  const label = target === "production" ? "production" : "preview";
   const deadline = now() + timeoutMs;
   let attempt = 0;
   let lastState = "none";
@@ -216,12 +226,12 @@ export async function resolvePreviewDeployment({
       continue;
     }
 
-    const deployment = pickPreviewDeployment(deployments, { repoName, branch, headSha });
+    const deployment = pickDeployment(deployments, { repoName, branch, headSha, target });
 
     if (!deployment) {
       const commit = headSha ? ` at ${headSha.slice(0, 7)}` : "";
       log(
-        `Attempt ${attempt}: no Vercel preview for ${repoName}@${branch}${commit} yet. Waiting...`,
+        `Attempt ${attempt}: no Vercel ${label} for ${repoName}@${branch}${commit} yet. Waiting...`,
       );
     } else {
       const state = deployment.state ?? deployment.readyState ?? "UNKNOWN";
@@ -232,14 +242,14 @@ export async function resolvePreviewDeployment({
         const branchAlias = deployment.meta?.branchAlias
           ? `https://${deployment.meta.branchAlias}`
           : null;
-        log(`Vercel preview ready: ${url} (${deployment.uid ?? "unknown deployment"})`);
-        return { url, id: deployment.uid ?? null, state, branchAlias };
+        log(`Vercel ${label} ready: ${url} (${deployment.uid ?? "unknown deployment"})`);
+        return { url, id: deployment.uid ?? null, state, branchAlias, target };
       }
 
       if (FAILED_STATES.has(state)) {
         const inspector = deployment.inspectorUrl ? ` Inspect: ${deployment.inspectorUrl}` : "";
         throw new Error(
-          `Vercel deployment ${deployment.uid ?? ""} for ${branch} is ${state}${
+          `Vercel ${label} deployment ${deployment.uid ?? ""} for ${branch} is ${state}${
             deployment.errorMessage ? `: ${deployment.errorMessage}` : ""
           }.${inspector}`,
         );
@@ -257,6 +267,6 @@ export async function resolvePreviewDeployment({
 
   const commit = headSha ? ` at ${headSha.slice(0, 7)}` : "";
   throw new Error(
-    `Timed out after ${Math.round(timeoutMs / 1000)}s waiting for a READY Vercel preview for ${repoName}@${branch}${commit} (last state: ${lastState}). Check that the Vercel project is connected to this repository and that the build was not skipped.`,
+    `Timed out after ${Math.round(timeoutMs / 1000)}s waiting for a READY Vercel ${label} deployment for ${repoName}@${branch}${commit} (last state: ${lastState}). Check that the Vercel project is connected to this repository and that the build was not skipped.`,
   );
 }

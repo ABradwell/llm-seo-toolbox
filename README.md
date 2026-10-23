@@ -233,12 +233,14 @@ Set `report-style: plain` when the comment is read by people outside engineering
 The repository dogfoods the action in
 [`.github/workflows/llm-seo-toolbox-audit.yml`](.github/workflows/llm-seo-toolbox-audit.yml).
 Pull requests audit the Vercel preview deployment for the pull request head
-commit, resolved from the Vercel REST API. The workflow waits up to ten minutes
-for the deployment to become `READY`, then audits its deployment URL. Pushes to
-`main` and manual runs audit `https://llm-seo-toolbox.vercel.app`, or the
-`LLM_SEO_TOOLBOX_AUDIT_URL` repository variable when set.
+commit, resolved from the Vercel REST API. Pushes to `main` and manual runs wait
+for the production deployment for the pushed commit, then audit
+`https://llm-seo-toolbox.vercel.app`, or the `LLM_SEO_TOOLBOX_AUDIT_URL`
+repository variable when set. The workflow waits up to ten minutes for the
+deployment to become `READY`, so it never audits the previous deployment while a
+new one is still building.
 
-Preview audits need a `VERCEL_TOKEN` repository secret with access to the
+The workflow needs a `VERCEL_TOKEN` repository secret with access to the
 project's team, plus `VERCEL_PROJECT_ID` and `VERCEL_TEAM_ID` repository
 variables (the team slug falls back to `bradwell-applications`). Preview
 deployments for this repository use Vercel Deployment Protection, so add the
