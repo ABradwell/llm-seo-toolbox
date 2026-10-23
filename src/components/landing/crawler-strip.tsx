@@ -25,7 +25,9 @@ export function CrawlerStrip() {
               <span key={crawler.id} className="flex items-center gap-1.5 font-mono text-[11px]">
                 <span className="size-1 rounded-[1px] bg-accent-light" aria-hidden="true" />
                 <span className="text-parchment">{crawler.label}</span>
-                <span className="text-[10px] text-parchment">{crawler.vendor}</span>
+                <span className="rounded-xs bg-accent-light px-1.5 py-0.5 text-[10px] tracking-[0.08em] text-ink uppercase">
+                  {crawler.vendor}
+                </span>
               </span>
             ))}
           </span>
