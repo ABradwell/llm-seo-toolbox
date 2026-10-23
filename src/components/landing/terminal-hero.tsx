@@ -17,7 +17,7 @@ export function TerminalHero() {
       />
 
       <div className="mx-auto grid w-full max-w-7xl items-center gap-12 px-4 py-14 sm:px-6 lg:grid-cols-[1.02fr_0.98fr] lg:gap-16 lg:py-20">
-        <div className="rise-in">
+        <div className="min-w-0 rise-in">
           <div className="flex flex-wrap items-center gap-2">
             <Badge
               variant="outline"
@@ -47,23 +47,23 @@ export function TerminalHero() {
             the exact line and code that fixes each miss.
           </p>
 
-          <dl className="mt-8 grid max-w-xl grid-cols-3 border-t border-parchment/15 pt-4">
+          <dl className="mt-8 grid max-w-xl grid-cols-3 gap-x-4 border-t border-parchment/15 pt-4">
             {[
               { value: "4", label: "protocol families" },
               { value: "20", label: "granular checks" },
               { value: "0", label: "signup / cookies" },
             ].map((item) => (
-              <div key={item.label}>
-                <dt className="font-mono text-[10px] tracking-[0.12em] text-parchment/60 uppercase">
+              <div key={item.label} className="flex flex-col">
+                <dt className="font-mono text-[10px] leading-snug tracking-[0.12em] text-parchment/60 uppercase">
                   {item.label}
                 </dt>
-                <dd className="mt-1 font-mono text-lg text-parchment">{item.value}</dd>
+                <dd className="mt-auto pt-1 font-mono text-lg text-parchment">{item.value}</dd>
               </div>
             ))}
           </dl>
         </div>
 
-        <div>
+        <div className="min-w-0">
           <div className="mb-3 flex items-center justify-between gap-3">
             <span className="inline-flex items-center gap-2 font-mono text-[10px] tracking-[0.14em] text-parchment/65 uppercase">
               <FileCheck2 className="size-3.5 text-accent-light" aria-hidden="true" />
