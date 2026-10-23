@@ -18,6 +18,12 @@ export interface CliOptions {
   output?: string;
   timeout?: number;
   userAgent?: string;
+  /** Extra request headers, used for protected previews and staging hosts. */
+  headers?: Record<string, string>;
+  /** Resolve links inside llms.txt. Defaults to true. */
+  resolveLinks?: boolean;
+  /** Compare a live fetch as GPTBot and OAI-SearchBot. Defaults to true. */
+  agentFetch?: boolean;
   verbose?: boolean;
   color?: boolean;
 }
@@ -88,6 +94,24 @@ export function parseSiteType(value: string): SiteType | null {
   return normalized;
 }
 
+const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+
+export function parseHeader(value: string): [string, string] {
+  const separator = value.indexOf(":");
+  if (separator === -1) {
+    throw new CliUsageError(`header must use “Name: value” (received “${value}”).`);
+  }
+  const name = value.slice(0, separator).trim();
+  const headerValue = value.slice(separator + 1).trim();
+  if (!name || !HEADER_NAME.test(name)) {
+    throw new CliUsageError(`header has an invalid name (received “${value}”).`);
+  }
+  if (!headerValue) {
+    throw new CliUsageError(`header “${name}” needs a value.`);
+  }
+  return [name, headerValue];
+}
+
 export function parseTimeout(value: string): number {
   const timeout = Number(value);
   if (
@@ -155,6 +179,14 @@ export function parseArgs(argv: string[]): ParsedArgs {
         options.color = true;
         index += 1;
         break;
+      case "--no-resolve-links":
+        options.resolveLinks = false;
+        index += 1;
+        break;
+      case "--no-agent-fetch":
+        options.agentFetch = false;
+        index += 1;
+        break;
       case "-f":
       case "--format": {
         const { value, next } = readValue(argv, index, flag);
@@ -209,6 +241,13 @@ export function parseArgs(argv: string[]): ParsedArgs {
         index = next;
         break;
       }
+      case "--header": {
+        const { value, next } = readValue(argv, index, flag);
+        const [name, headerValue] = parseHeader(value);
+        options.headers = { ...options.headers, [name]: headerValue };
+        index = next;
+        break;
+      }
       default:
         throw new CliUsageError(`Unknown option “${flag}”. Run ${CLI_NAME} --help for usage.`);
     }
@@ -250,6 +289,9 @@ Options
   -o, --output <file>     Write the report to a file instead of stdout
       --timeout <ms>      Per-request timeout (default: 10000)
       --user-agent <ua>   Override the crawler user agent
+      --header <name:value> Extra request header; repeat for multiple headers
+      --no-resolve-links  Skip HEAD requests that verify llms.txt links
+      --no-agent-fetch    Skip the live GPTBot and OAI-SearchBot comparison
   -v, --verbose           Log progress and timing to stderr
       --no-color          Disable ANSI colour
       --version           Print the version

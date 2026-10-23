@@ -32,7 +32,7 @@ Audit the four things that decide whether an AI crawler can find, read and class
 
 AI answers are assembled from what a crawler can read. If the manifest is missing, `robots.txt` blocks the wrong agent, or the first HTML response is a JavaScript shell, the page does not enter the context window. LLMReady measures that surface without rendering the target and returns the exact source line and a copy-paste fix for every miss.
 
-- **Audit** any public URL against 20 checks across four protocol pillars. The default site score belongs to the origin and samples up to eight pages; `scope=page` keeps the original single-page audit.
+- **Audit** any public URL against 49 check ids across four protocol pillars: 33 scored checks plus 16 per-crawler access rows that stay visible but carry no weight. The default site score belongs to the origin and samples up to eight pages; `scope=page` keeps the original single-page audit.
 - **Author** `/llms.txt` and `/llms-full.txt` from the pages the audit discovered, with live structural validation.
 - **See** the focus page's initial HTML next to the markdown an LLM scraper actually reads.
 
@@ -54,7 +54,7 @@ A **view** switch sets how much detail the first tab shows. The default is **pla
 | :-------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **What to fix**       | The plain-language view: a grade in plain words, must-fix and worth-improving cards with change requests, a copyable brief for developers, and a list of what already works. Shown when the view is `plain`.                                                                                                          |
 | **Audit matrix**      | Shown when the view is `technical`. Site or page score and grade, per-pillar breakdown, every check with pass/warn/fail, the protocol it enforces, the source file and exact line number, sample coverage for aggregated page checks, a prioritized fix queue, discovery file table, and expandable code-level fixes. |
-| **Sampled pages**     | The pages that feed the site score, with per-page status, score, outline, static-text and robots signals. Expand a row for its eight page-level checks. The focus page is shown separately when it was not in the sample.                                                                                             |
+| **Sampled pages**     | The pages that feed the site score, with per-page status, score, outline, static-text, freshness, FAQ and robots signals. Expand a row for its 18 page-level checks. The focus page is shown separately when it was not in the sample.                                                                                |
 | **`llms.txt` editor** | Edit the site name, summary and notes, choose discovered sections, then preview `llms.txt` or `llms-full.txt` with line numbers, live validation and copy/download actions.                                                                                                                                           |
 | **Scraper simulator** | The focus page's raw HTML beside the cleaned markdown a non-JS crawler would ingest, with payload reduction, token estimates, stripped-element counts and line numbers on both panes.                                                                                                                                 |
 
@@ -146,18 +146,21 @@ pnpm cli example.com
 node packages/cli/dist/index.js example.com --format json
 ```
 
-| Flag                   | Short | Default         | Description                                                                                       |
-| :--------------------- | :---- | :-------------- | :------------------------------------------------------------------------------------------------ |
-| `--format <type>`      | `-f`  | `table`         | `table`, `json`, `markdown`, `summary` or `brief` (plain-language change requests)                |
-| `--min-score <number>` | `-s`  | `0`             | Composite score required to pass (0–100)                                                          |
-| `--min-grade <grade>`  | `-g`  | `F`             | Letter grade required to pass (`A`, `B`, `C`, `D`, `F`)                                           |
-| `--site-type <type>`   | `-t`  | `auto`          | Force a profile: `auto`, `saas`, `portfolio`, `docs`, `ecommerce`, `local-business`, `blog-media` |
-| `--config <path>`      | `-c`  | auto-discovered | Configuration file to load                                                                        |
-| `--output <file>`      | `-o`  | stdout          | Write the report to a file                                                                        |
-| `--timeout <ms>`       |       | `10000`         | Per-request timeout                                                                               |
-| `--user-agent <ua>`    |       | toolbox default | Override the crawler user agent                                                                   |
-| `--verbose`            | `-v`  | `false`         | Log progress and timing to stderr                                                                 |
-| `--no-color`           |       | TTY-dependent   | Disable ANSI colour (also honours `NO_COLOR`)                                                     |
+| Flag                    | Short | Default         | Description                                                                                       |
+| :---------------------- | :---- | :-------------- | :------------------------------------------------------------------------------------------------ |
+| `--format <type>`       | `-f`  | `table`         | `table`, `json`, `markdown`, `summary` or `brief` (plain-language change requests)                |
+| `--min-score <number>`  | `-s`  | `0`             | Composite score required to pass (0–100)                                                          |
+| `--min-grade <grade>`   | `-g`  | `F`             | Letter grade required to pass (`A`, `B`, `C`, `D`, `F`)                                           |
+| `--site-type <type>`    | `-t`  | `auto`          | Force a profile: `auto`, `saas`, `portfolio`, `docs`, `ecommerce`, `local-business`, `blog-media` |
+| `--config <path>`       | `-c`  | auto-discovered | Configuration file to load                                                                        |
+| `--output <file>`       | `-o`  | stdout          | Write the report to a file                                                                        |
+| `--timeout <ms>`        |       | `10000`         | Per-request timeout                                                                               |
+| `--user-agent <ua>`     |       | toolbox default | Override the crawler user agent                                                                   |
+| `--header <name:value>` |       |                 | Extra request header; repeat for multiple headers                                                 |
+| `--no-resolve-links`    |       | resolve         | Skip the HEAD requests that verify links inside `llms.txt`                                        |
+| `--no-agent-fetch`      |       | enabled         | Skip the live GPTBot and OAI-SearchBot firewall comparison                                        |
+| `--verbose`             | `-v`  | `false`         | Log progress and timing to stderr                                                                 |
+| `--no-color`            |       | TTY-dependent   | Disable ANSI colour (also honours `NO_COLOR`)                                                     |
 
 Exit codes: **0** threshold met, **1** audit completed below a threshold, **2**
 the audit could not run (bad arguments, unreachable host, timeout).
@@ -175,9 +178,15 @@ to get started.
   "minScore": 75,
   "minGrade": "B",
   "siteType": "auto",
-  "timeout": 10000
+  "timeout": 10000,
+  "resolveLinks": true,
+  "agentFetch": true
 }
 ```
+
+Add a `headers` object (or repeat `--header`) when a staging or preview host
+needs an extra request header. For example, Vercel's automation bypass uses
+`{"headers": {"x-vercel-protection-bypass": "..."}}`.
 
 ## GitHub Action
 
@@ -200,16 +209,19 @@ threshold.
     github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-| Input           | Default               | Description                                      |
-| :-------------- | :-------------------- | :----------------------------------------------- |
-| `url`           | required              | Target URL to audit                              |
-| `min-score`     | `75`                  | Minimum composite score required to pass         |
-| `min-grade`     | `B`                   | Minimum letter grade required to pass            |
-| `site-type`     | `auto`                | Force a profile or keep automatic classification |
-| `comment-on-pr` | `true`                | Create or update the sticky pull request comment |
-| `github-token`  | `${{ github.token }}` | Token used to write the comment                  |
-| `timeout`       | `10000`               | Per-request timeout in milliseconds              |
-| `report-style`  | `technical`           | `technical` matrix, or `plain` change requests   |
+| Input           | Default               | Description                                       |
+| :-------------- | :-------------------- | :------------------------------------------------ |
+| `url`           | required              | Target URL to audit                               |
+| `min-score`     | `75`                  | Minimum composite score required to pass          |
+| `min-grade`     | `B`                   | Minimum letter grade required to pass             |
+| `site-type`     | `auto`                | Force a profile or keep automatic classification  |
+| `comment-on-pr` | `true`                | Create or update the sticky pull request comment  |
+| `github-token`  | `${{ github.token }}` | Token used to write the comment                   |
+| `timeout`       | `10000`               | Per-request timeout in milliseconds               |
+| `report-style`  | `technical`           | `technical` matrix, or `plain` change requests    |
+| `resolve-links` | `true`                | Verify up to six links inside `llms.txt`          |
+| `agent-fetch`   | `true`                | Compare a live fetch as GPTBot and OAI-SearchBot  |
+| `headers`       | none                  | Extra request headers, one `Name: value` per line |
 
 Outputs: `score`, `grade`, `passed` and `report-json`.
 
@@ -217,8 +229,12 @@ Set `report-style: plain` when the comment is read by people outside engineering
 
 The repository dogfoods the action in
 [`.github/workflows/llm-seo-toolbox-audit.yml`](.github/workflows/llm-seo-toolbox-audit.yml).
-The audited URL defaults to `https://llm-seo-toolbox.vercel.app` and can be
-overridden with the `LLM_SEO_TOOLBOX_AUDIT_URL` repository variable.
+Pull requests audit the Vercel preview URL discovered from the Vercel pull
+request comment; pushes to `main` and manual runs audit
+`https://llm-seo-toolbox.vercel.app`, or the `LLM_SEO_TOOLBOX_AUDIT_URL`
+repository variable when set. If preview deployments use Vercel Deployment
+Protection, add the `VERCEL_AUTOMATION_BYPASS_SECRET` repository secret so the
+workflow can send the `x-vercel-protection-bypass` header.
 
 Pull requests from forks receive a read-only token, so the comment step logs a
 warning and the audit still runs.
@@ -264,11 +280,11 @@ Accepted values are `saas`, `portfolio`, `docs`, `ecommerce`, `local-business` a
 
 ### Site score vs page score
 
-The default audit is **site-scoped**. The score belongs to the origin, so `/` and `/docs/start` return the same score and the same sample. The engine builds an inventory from the sitemap and homepage links, selects up to **eight pages deterministically** (homepage first, then one page per section before a second page from any section), and runs the eight page-level checks across that sample. The URL you entered becomes the **focus page** for the drill-down, but it is not added to the site score unless the sampler already selected it. If it was selected, its existing result is reused.
+The default audit is **site-scoped**. The score belongs to the origin, so `/` and `/docs/start` return the same score and the same sample. The engine builds an inventory from the sitemap and homepage links, selects up to **eight pages deterministically** (homepage first, then one page per section before a second page from any section), and runs the 18 page-level checks across that sample. The URL you entered becomes the **focus page** for the drill-down, but it is not added to the site score unless the sampler already selected it. If it was selected, its existing result is reused.
 
-Twelve origin-level checks run once: the three discovery files, `robots.txt` reachability and AI policy, the five named-crawler rules, OpenAPI and `.well-known`. The eight page-level checks (meta robots, `X-Robots-Tag`, H1, heading order, SNR, SSR payload, JSON-LD and profile schema) are aggregated by the **mean of their status points** across analyzed pages. Seven of eight pages passing is `87.5 → 88`, so the aggregate is a warning, not a 50-point binary warning. Site scope is the default; `scope=page` restores the V2 single-page hybrid audit, where the entered page's checks are scored directly.
+The engine evaluates **49 check ids**: 33 scored checks plus 16 per-crawler access rows. The bot rows stay visible in the matrix but carry weight `0`, so they never double count against the three intent groups. Fifteen scored checks run once for the origin: the discovery files, feed and markdown mirror, `robots.txt` reachability and AI policy, the search/fetch/training intent groups, the live firewall comparison, `Content-Signal`, entity identity, OpenAPI and `.well-known`. The 18 page-level checks are aggregated by the **mean of their status points** across analyzed pages. Seven of eight pages passing is `87.5 → 88`, so the aggregate is a warning, not a 50-point binary warning. Site scope is the default; `scope=page` restores the single-page hybrid audit, where the entered page's checks are scored directly.
 
-Each scored check returns **pass**, **warn** or **fail**, worth 100, 50 and 0 points. A pillar score is the weighted average of its checks; the overall score is the mean of the four pillars, so every pillar matters equally. Informational checks do not contribute. Aggregated page checks carry their mean score in `check.score`; the displayed status uses ≥ 90 pass, ≥ 50 warn, otherwise fail.
+Each scored check returns **pass**, **warn** or **fail**, worth 100, 50 and 0 points. A pillar score is the weighted average of its checks; the overall score is the mean of the four pillars, so every pillar matters equally. Informational checks and zero-weight rows do not contribute. Aggregated page checks carry their mean score in `check.score`; the displayed status uses ≥ 90 pass, ≥ 50 warn, otherwise fail. The scoring model is versioned as `site-2`; cached `site-1` results are not reused.
 
 | Grade | Score  | Label             |
 | :---- | :----- | :---------------- |
@@ -280,40 +296,55 @@ Each scored check returns **pass**, **warn** or **fail**, worth 100, 50 and 0 po
 
 ### 1. Discovery & Manifests
 
-These three checks are **origin-level** and run once per audit.
+`llms-txt`, `llms-full-txt`, `sitemap`, `feed` and `markdown-mirror` are **origin-level** and run once per audit. `freshness` and `canonical` are **page-level** and aggregated across the sample.
 
-| Check           | Weight | Passing means                                                                                                                                                           |
-| :-------------- | :----- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `llms.txt`      | 3      | Served as plain text at the root, with one H1, a summary and a markdown link index. Structural errors are reported.                                                     |
-| `llms-full.txt` | 1      | A usable, unpaginated bundle. Optional: a missing file is a warning, not a failure.                                                                                     |
-| `sitemap.xml`   | 2      | A URL set is discovered at `/sitemap.xml` or a robots-referenced location **and** `robots.txt` contains a `Sitemap:` directive. Without the directive, the check warns. |
+| Check             | Weight                                | Passing means                                                                                                                                                                        |
+| :---------------- | :------------------------------------ | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `llms-txt`        | 3                                     | Served as plain text at the root, with one H1, a summary and a markdown link index. Up to six links are resolved; broken or undeclared off-origin links downgrade to warn.           |
+| `llms-full-txt`   | 1                                     | A usable, unpaginated bundle. Optional: a missing file is a warning, not a failure.                                                                                                  |
+| `sitemap`         | 2                                     | A URL set is discovered at `/sitemap.xml` or a robots-referenced location **and** `robots.txt` contains a `Sitemap:` directive. The detail reports the share of URLs with `lastmod`. |
+| `feed`            | 1 blog-media, 0.5 docs/SaaS, 0 others | An RSS, Atom or JSON Feed alternate resolves to a non-HTML body with at least one item. Informational on other profiles.                                                             |
+| `markdown-mirror` | 1.5 docs/SaaS, 0 others               | Content negotiation, a `text/markdown` alternate or a `.md` sibling returns markdown whose first heading matches the page H1. Informational on other profiles.                       |
+| `freshness`       | 1.5 (2.5 blog-media/docs)             | A machine-readable modified date within 18 months, with the sitemap `lastmod` agreeing within 7 days. Published-only, stale or disagreeing dates warn.                               |
+| `canonical`       | 1                                     | An absolute, same-origin canonical that is self-referential or points at a URL in the inventory. Missing or relative warns; off-origin fails.                                        |
 
 Every issue carries a 1-based line number from the fetched response, so the matrix can point at the exact malformed heading, link or directive.
 
 ### 2. Crawler Access Rules
 
-`robots.txt` reachability, the explicit AI policy and the five named-crawler rules are **origin-level**. The robots meta tag and `X-Robots-Tag` are **page-level**: each sampled page is checked, then the results are aggregated.
+`robots.txt` reachability, the explicit AI policy, the three intent groups, the live firewall comparison and `Content-Signal` are **origin-level**. The robots meta tag and `X-Robots-Tag` are **page-level**: each sampled page is checked, then the results are aggregated.
 
-| Check                                                                   | Weight | Passing means                                                                    |
-| :---------------------------------------------------------------------- | :----- | :------------------------------------------------------------------------------- |
-| `robots.txt` reachable                                                  | 1      | The file is served and parses into user-agent groups. A missing file warns.      |
-| Explicit AI user-agent policy                                           | 1      | At least one AI crawler is named in its own group, making intent auditable.      |
-| `GPTBot`, `ClaudeBot`, `Google-Extended`, `PerplexityBot`, `Bytespider` | 2 each | No matching rule blocks the origin root (`/`).                                   |
-| `robots` meta directives                                                | 1      | No `noindex` or `none` on the page. Aggregated across the sample.                |
-| `X-Robots-Tag` header                                                   | 2      | The response does not send a blocking header; scoped restrictions are evaluated. |
+| Check              | Weight | Passing means                                                                                                                       |
+| :----------------- | :----- | :---------------------------------------------------------------------------------------------------------------------------------- |
+| `robots-reachable` | 1      | The file is served and parses into user-agent groups. A missing file warns.                                                         |
+| `ai-policy`        | 1      | At least one AI crawler is named in its own group, making intent auditable.                                                         |
+| `access-search`    | 3      | Every search and citation crawler is allowed on every sampled path.                                                                 |
+| `access-fetch`     | 2      | Every on-demand fetch agent is allowed on every sampled path.                                                                       |
+| `access-training`  | 1      | Every training crawler is named explicitly, whether the group allows or blocks training.                                            |
+| `agent-fetch`      | 3      | A live fetch as GPTBot and OAI-SearchBot is not blocked by the firewall. A training-only block warns.                               |
+| `content-signal`   | 0.5    | Cloudflare `Content-Signal` values agree with the crawler groups in `robots.txt`.                                                   |
+| 16 `bot-<id>` rows | 0      | Per-crawler detail for the 16-agent roster. Visible in the matrix, grouped under search, fetch or training, but never scored twice. |
+| `meta-robots`      | 1      | No `noindex` or `none` on the page. Aggregated across the sample.                                                                   |
+| `x-robots-tag`     | 2      | The response does not send a blocking header; scoped restrictions are evaluated.                                                    |
 
-RFC 9309 matching is implemented directly: the longest matching path wins, `Allow` wins ties, and both `*` and `$` syntax are supported. Blocking all agents with a wildcard `Disallow: /` is reported per vendor. Crawler rules are origin-level and evaluated once against `/`; per-page access is covered by the aggregated `robots` meta and `X-Robots-Tag` checks.
+RFC 9309 matching is implemented directly: the longest matching path wins, `Allow` wins ties, and both `*` and `$` syntax are supported. Path-aware access is evaluated against every sampled path, so a crawler blocked on `/docs` is not reported as allowed just because `/` is open. Blocking all agents with a wildcard `Disallow: /` is reported per vendor.
 
 ### 3. Static Parseability
 
-All four checks are **page-level**. In site scope they are aggregated across the sample; in `scope=page` they score the entered page directly.
+All ten checks are **page-level**. In site scope they are aggregated across the sample; in `scope=page` they score the entered page directly.
 
-| Check                   | Weight | Passing means                                                                                         |
-| :---------------------- | :----- | :---------------------------------------------------------------------------------------------------- |
-| Single H1               | 1.5    | Exactly one top-level heading inside the content region.                                              |
-| Heading sequence        | 2      | No skipped levels, and the outline does not start deeper than H1.                                     |
-| Static HTML SNR         | 2.5    | ≥ 65 % of visible text is content signal (warn ≥ 45 %, fail below).                                   |
-| Server-rendered content | 2      | ≥ 600 characters of readable text in the initial HTML response (warn ≥ 200) — no JavaScript required. |
+| Check              | Weight                                 | Passing means                                                                                         |
+| :----------------- | :------------------------------------- | :---------------------------------------------------------------------------------------------------- |
+| `h1`               | 1.5                                    | Exactly one top-level heading inside the content region.                                              |
+| `heading-order`    | 2                                      | No skipped levels, and the outline does not start deeper than H1.                                     |
+| `snr`              | 2.5                                    | ≥ 65 % of visible text is content signal (warn ≥ 45 %, fail below).                                   |
+| `ssr-content`      | 2                                      | ≥ 600 characters of readable text in the initial HTML response (warn ≥ 200) — no JavaScript required. |
+| `faq-content`      | 2 where FAQ is expected, 0.5 elsewhere | Three or more visible question-and-answer pairs, with FAQPage markup matching the visible answers.    |
+| `answer-first`     | 1.5                                    | A 40–160 word summary paragraph between the H1 and the first H2.                                      |
+| `section-chunks`   | 1                                      | H2/H3 sections with an 80–500 word median, so an answer can be quoted without pulling the whole page. |
+| `page-metadata`    | 1.5                                    | A title, meta description, `lang` and OpenGraph basics are present and consistent.                    |
+| `image-alt`        | 0.5 (1.5 portfolio/ecommerce)          | Meaningful images carry alt text of at least four characters.                                         |
+| `citable-evidence` | 0.5 blog-media/SaaS                    | Numeric claims and outbound references give a model something concrete to cite.                       |
 
 **Signal-to-noise ratio (SNR)** is content text divided by content text plus text from repeated chrome: `nav`, `header`, `footer`, `aside`, `role="banner"`, `role="contentinfo"`, `role="complementary"`, consent/cookie widgets and `aria-hidden` nodes. Scripts, styles, SVGs and frames are removed before measurement. A page that is mostly navigation scores low even when it has a lot of total text.
 
@@ -321,14 +352,17 @@ The content region is `main`, else `[role="main"]`, else the richest `article`, 
 
 ### 4. Structured Machine Interfaces
 
-JSON-LD and the profile schema are **page-level** and aggregated across the sample. OpenAPI and `.well-known` discovery are **origin-level** and run once.
+`json-ld`, `schema-types`, `schema-depth` and `breadcrumbs` are **page-level** and aggregated across the sample. `entity-identity`, OpenAPI and `.well-known` discovery are **origin-level** and run once.
 
-| Check                   | Weight | Passing means                                                                                                                  |
-| :---------------------- | :----- | :----------------------------------------------------------------------------------------------------------------------------- |
-| JSON-LD presence/syntax | 2.5    | At least one `application/ld+json` block parses, with `@context`/`@type` when present.                                         |
-| Profile schema types    | 1.5    | One of the profile's expected types is present — e.g. `TechArticle` for docs, `Product` for e-commerce.                        |
-| OpenAPI description     | 1.5    | `/openapi.json`, `/.well-known/openapi.json` or `/openapi.yaml` looks like an OpenAPI document. Scored only for SaaS and docs. |
-| `.well-known` discovery | 0.5    | `security.txt` or `ai-plugin.json` is present and valid. Low weight because it is an optional discovery surface.               |
+| Check             | Weight | Passing means                                                                                                                                                            |
+| :---------------- | :----- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `json-ld`         | 2.5    | At least one JSON-LD block parses, with `@context`/`@type` when present. Microdata and RDFa are also detected and reported.                                              |
+| `schema-types`    | 1.5    | One of the profile's required types is present — e.g. `TechArticle` for docs, `Product` for e-commerce.                                                                  |
+| `schema-depth`    | 1.5    | The matching type fills the properties a model needs, such as `author`, `dateModified` and `publisher` for an article.                                                   |
+| `breadcrumbs`     | 0.5    | Pages two or more segments deep publish a `BreadcrumbList` whose last item points at the page.                                                                           |
+| `entity-identity` | 2.5    | The homepage and company pages expose a consistent `Organization` or `Person` identity with `sameAs` links.                                                              |
+| `openapi`         | 1.5    | `/openapi.json`, `/.well-known/openapi.json`, `/openapi.yaml` or an `application/linkset+json` API catalog points at an OpenAPI document. Scored only for SaaS and docs. |
+| `well-known`      | 0.5    | `security.txt` is valid, and SaaS/docs sites publish an API catalog at `/.well-known/api-catalog`.                                                                       |
 
 ## API
 
@@ -504,7 +538,7 @@ The site score is origin-scoped: `finalUrl` is the site root, `focusUrl` is the 
     "cached": false,
     "siteCached": false,
     "focusCached": false,
-    "scoringVersion": "site-1",
+    "scoringVersion": "site-2",
   },
 }
 ```
@@ -551,7 +585,7 @@ The deployment practices what it audits. These files are generated from the same
 1. **Validate the target.** Only `http`/`https` on ports 80/443. The hostname is resolved and checked against loopback, private, link-local, multicast and reserved ranges (IPv4 and IPv6), plus blocked TLDs such as `.local` and `.internal`.
 2. **Fetch politely.** Redirects are followed manually (max 5) and every hop is re-validated, so a public host cannot bounce the request into your network. Responses are capped by byte ceiling and timeout, `no-store`, with a descriptive user agent.
 3. **Anchor the site.** The site root is the seed for a site audit. If the root does not return HTML and the user entered a deeper page, that page replaces the seed and `coverage.homepageFallback` records it.
-4. **Read the discovery surface.** `robots.txt`, `llms.txt`, `llms-full.txt`, `sitemap.xml` (indexes are expanded, with a fetch budget), `/openapi.json`, `/.well-known/security.txt` and `/.well-known/ai-plugin.json` — concurrently.
+4. **Read the discovery surface.** `robots.txt`, `llms.txt`, `llms-full.txt`, `sitemap.xml` (indexes are expanded, with a fetch budget), `/openapi.json` or `/.well-known/api-catalog`, and `/.well-known/security.txt` — concurrently. The homepage's advertised feed and markdown mirror are checked in the same pass.
 5. **Validate the manifests.** `llms.txt` is parsed for one H1, a blockquote summary, H2 sections, markdown links and pagination markers. Invalid files fail; missing optional files warn.
 6. **Build the inventory.** Sitemap URLs come first, then same-origin homepage links that look like pages. Navigation query strings, asset extensions and utility prefixes are filtered. The editor keeps the first 80 URLs; `coverage.inventorySize` records the full count.
 7. **Select the sample.** The homepage is always included. The rest are picked deterministically one per section before a second page from any section, up to eight pages. **Focus selection never reads the URL the user entered**, so `/` and `/docs/start` produce the same sample.
@@ -574,10 +608,18 @@ Because nothing is rendered in a browser, the audit reports what is **in the ini
 ├── packages/
 │   ├── core/                # Shared audit engine used by the web app, CLI and action
 │   │   └── src/
-│   │       ├── analyzer.ts  # Scope-aware orchestration, caches and 20 check builders
+│   │       ├── analyzer.ts  # Scope-aware orchestration, caches and origin-level checks
+│   │       ├── crawlers.ts  # 16-crawler roster with training, search and fetch intent
 │   │       ├── sampling.ts  # Inventory, deterministic sample, bounded concurrency
-│   │       ├── page-audit.ts # Per-page extraction and eight page-level checks
+│   │       ├── page-audit.ts # Per-page extraction and 18 page-level checks
 │   │       ├── aggregate.ts # Mean-status aggregation for page-level checks
+│   │       ├── metadata.ts  # One head pass: title, description, canonical, dates, feeds
+│   │       ├── structured-data.ts # JSON-LD, microdata and RDFa extraction
+│   │       ├── schema-depth.ts    # Required-property depth for the matched type
+│   │       ├── entities.ts        # Organization and Person identity signals
+│   │       ├── faq.ts       # Visible question-and-answer detection
+│   │       ├── dates.ts     # Machine-readable freshness signals
+│   │       ├── agent-fetch.ts # GPTBot vs OAI-SearchBot firewall comparison
 │   │       ├── classifier.ts# V3 site-profile classifier and confidence scoring
 │   │       ├── score.ts     # Weighting and grades
 │   │       └── …            # Content, directives, robots, sitemap, security
@@ -604,7 +646,7 @@ Because nothing is rendered in a browser, the audit reports what is **in the ini
 
 ## Testing
 
-`pnpm test` runs the Vitest suite over the pure helpers and the orchestration path — RFC 9309 parsing and agent decisions with source lines, sitemap parsing and index expansion, SSRF validation, scoring, `llms.txt` validation, directive evaluation, site classification, and the content model (scope selection, chrome removal, heading lines, SNR) — on fixtures, with no network access.
+`pnpm test` runs the Vitest suite over the pure helpers and the orchestration path — RFC 9309 parsing, path-aware agent decisions with source lines, `Content-Signal`, sitemap parsing and index expansion, SSRF validation, scoring, `llms.txt` validation, link resolution and coverage, directive evaluation, site classification, metadata extraction, structured-data formats and schema depth, entity identity, visible FAQ detection, freshness signals, the agent firewall comparison, and the content model (scope selection, chrome removal, heading lines, SNR) — on fixtures, with no network access.
 
 The site-scoped suite also covers deterministic stratified sampling, bounded concurrency, mean-status aggregation (`7/8` pass becomes `88` / warn), per-page extraction, weighted rate-limit costs, the 14-step pipeline copy, and a full `analyzeSite` run with mocked fetches that proves `/` and `/docs/app` return the same sample and site score while resolving different focus pages.
 

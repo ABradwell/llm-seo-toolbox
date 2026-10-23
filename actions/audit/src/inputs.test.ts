@@ -14,6 +14,9 @@ describe("readInputs", () => {
       githubToken: null,
       timeoutMs: 10_000,
       reportStyle: "technical",
+      resolveLinks: true,
+      agentFetch: true,
+      headers: {},
     });
   });
 
@@ -51,6 +54,37 @@ describe("readInputs", () => {
     expect(() => readInputs({ INPUT_URL: "x", "INPUT_REPORT-STYLE": "fancy" })).toThrow(
       /report-style/,
     );
+  });
+
+  it("can disable llms.txt link resolution and the agent fetch", () => {
+    const inputs = readInputs({
+      INPUT_URL: "x",
+      "INPUT_RESOLVE-LINKS": "false",
+      "INPUT_AGENT-FETCH": "false",
+    });
+    expect(inputs.resolveLinks).toBe(false);
+    expect(inputs.agentFetch).toBe(false);
+    expect(() => readInputs({ INPUT_URL: "x", "INPUT_RESOLVE-LINKS": "maybe" })).toThrow(
+      /resolve-links/,
+    );
+    expect(() => readInputs({ INPUT_URL: "x", "INPUT_AGENT-FETCH": "maybe" })).toThrow(
+      /agent-fetch/,
+    );
+  });
+
+  it("parses optional request headers and skips empty values", () => {
+    const inputs = readInputs({
+      INPUT_URL: "x",
+      INPUT_HEADERS: "x-vercel-protection-bypass: secret\n\n# comment\nx-empty:\nx-custom: value",
+    });
+    expect(inputs.headers).toEqual({
+      "x-vercel-protection-bypass": "secret",
+      "x-custom": "value",
+    });
+    expect(() => readInputs({ INPUT_URL: "x", INPUT_HEADERS: "missing-colon" })).toThrow(
+      /Name: value/,
+    );
+    expect(() => readInputs({ INPUT_URL: "x", INPUT_HEADERS: ": secret" })).toThrow(/invalid name/);
   });
 
   it("rejects missing and malformed inputs", () => {

@@ -9,11 +9,26 @@ export interface PageCheckGroups {
   };
   parseability: AuditCheck[];
   structured: AuditCheck[];
+  discovery: AuditCheck[];
 }
 
 const ACCESS_IDS = ["meta-robots", "x-robots-tag"] as const;
-const PARSEABILITY_IDS = ["h1", "heading-order", "snr", "ssr-content"] as const;
-const STRUCTURED_IDS = ["json-ld", "schema-types"] as const;
+const PARSEABILITY_IDS = [
+  "h1",
+  "heading-order",
+  "snr",
+  "ssr-content",
+  "faq-content",
+  "answer-first",
+  "section-chunks",
+  "page-metadata",
+  "image-alt",
+  "citable-evidence",
+] as const;
+const STRUCTURED_IDS = ["json-ld", "schema-types", "schema-depth", "breadcrumbs"] as const;
+const DISCOVERY_IDS = ["freshness", "canonical"] as const;
+
+const ALL_IDS = [...ACCESS_IDS, ...PARSEABILITY_IDS, ...STRUCTURED_IDS, ...DISCOVERY_IDS] as const;
 
 /**
  * Aggregate one check across sampled pages by mean status score.
@@ -21,10 +36,9 @@ const STRUCTURED_IDS = ["json-ld", "schema-types"] as const;
  */
 export function aggregatePageChecks(pages: PageAuditResult[]): PageCheckGroups {
   const analyzed = pages.filter((page) => page.outcome === "analyzed");
-  const allIds = [...ACCESS_IDS, ...PARSEABILITY_IDS, ...STRUCTURED_IDS];
   const aggregated = new Map<string, AuditCheck>();
 
-  for (const id of allIds) {
+  for (const id of ALL_IDS) {
     aggregated.set(id, aggregateCheck(id, analyzed));
   }
 
@@ -45,6 +59,7 @@ function groupsFromMap(map: Map<string, AuditCheck>): PageCheckGroups {
     },
     parseability: PARSEABILITY_IDS.map((id) => map.get(id) ?? missingCheck(id, fallbackLabel(id))),
     structured: STRUCTURED_IDS.map((id) => map.get(id) ?? missingCheck(id, fallbackLabel(id))),
+    discovery: DISCOVERY_IDS.map((id) => map.get(id) ?? missingCheck(id, fallbackLabel(id))),
   };
 }
 
@@ -65,14 +80,11 @@ function aggregateCheck(id: string, pages: PageAuditResult[]): AuditCheck {
     .map((entry) => statusScore(entry.check.status))
     .filter((value): value is number => value !== null);
 
-  if (scores.length === 0) return missingCheck(id, template.label);
-
-  const score = Math.round(scores.reduce((sum, value) => sum + value, 0) / scores.length);
   const passed = observations.filter((entry) => entry.check.status === "pass").length;
   const warned = observations.filter((entry) => entry.check.status === "warn").length;
   const failed = observations.filter((entry) => entry.check.status === "fail").length;
   const affected = observations
-    .filter((entry) => entry.check.status !== "pass")
+    .filter((entry) => entry.check.status !== "pass" && entry.check.status !== "info")
     .map((entry) => entry.page.url)
     .slice(0, 5);
 
@@ -84,6 +96,18 @@ function aggregateCheck(id: string, pages: PageAuditResult[]): AuditCheck {
     affected,
   };
 
+  if (scores.length === 0) {
+    return {
+      ...template,
+      status: "info",
+      score: undefined,
+      scope: "page",
+      summary: `Info across ${observations.length} pages`,
+      sample,
+    };
+  }
+
+  const score = Math.round(scores.reduce((sum, value) => sum + value, 0) / scores.length);
   const status = score >= 90 ? "pass" : score >= 50 ? "warn" : "fail";
   const failing = observations.find((entry) => entry.check.status !== "pass");
   // A passing page carries no recommendation or fix, so prefer a failing page as the template.
@@ -132,10 +156,30 @@ function fallbackLabel(id: string): string {
       return "Static HTML signal-to-noise";
     case "ssr-content":
       return "SSR payload readability";
+    case "faq-content":
+      return "Visible FAQ content";
+    case "answer-first":
+      return "Answer-first summary";
+    case "section-chunks":
+      return "Chunk-friendly sections";
+    case "page-metadata":
+      return "Page title and description";
+    case "image-alt":
+      return "Image alt text";
+    case "citable-evidence":
+      return "Statistics and references";
     case "json-ld":
-      return "JSON-LD presence & syntax";
+      return "Structured data presence & syntax";
     case "schema-types":
       return "Profile schema types";
+    case "schema-depth":
+      return "Schema property depth";
+    case "breadcrumbs":
+      return "Breadcrumb trail";
+    case "freshness":
+      return "Freshness signals";
+    case "canonical":
+      return "Canonical URL";
     default:
       return id;
   }

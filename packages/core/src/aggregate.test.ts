@@ -11,8 +11,18 @@ const IDS = [
   "heading-order",
   "snr",
   "ssr-content",
+  "faq-content",
+  "answer-first",
+  "section-chunks",
+  "page-metadata",
+  "image-alt",
+  "citable-evidence",
   "json-ld",
   "schema-types",
+  "schema-depth",
+  "breadcrumbs",
+  "freshness",
+  "canonical",
 ];
 
 function check(id: string, status: AuditCheck["status"]): AuditCheck {
@@ -48,8 +58,15 @@ function page(url: string, h1Status: AuditCheck["status"]): PageAuditResult {
     h1Count: 1,
     headingCount: 3,
     jsonLdTypes: [],
+    structuredFormats: [],
     metaRobots: "",
     xRobotsTag: null,
+    freshness: null,
+    faqPairs: 0,
+    hasFaqSchema: false,
+    identity: [],
+    descriptionChars: 0,
+    canonical: null,
     fetchMs: 10,
   };
 }

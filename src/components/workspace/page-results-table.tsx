@@ -102,7 +102,7 @@ export function PageResultsTable({ audit }: { audit: AuditResult }) {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[920px] border-collapse text-left">
+          <table className="w-full min-w-[1120px] border-collapse text-left">
             <thead>
               <tr className="border-b border-line bg-panel/60 font-mono text-[9px] tracking-[0.12em] text-muted uppercase">
                 <th className="w-16 px-4 py-2 font-normal">status</th>
@@ -111,6 +111,8 @@ export function PageResultsTable({ audit }: { audit: AuditResult }) {
                 <th className="w-20 px-3 py-2 font-normal">score</th>
                 <th className="w-28 px-3 py-2 font-normal">outline</th>
                 <th className="w-28 px-3 py-2 font-normal">static text</th>
+                <th className="w-28 px-3 py-2 font-normal">freshness</th>
+                <th className="w-24 px-3 py-2 font-normal">FAQ</th>
                 <th className="w-32 px-3 py-2 font-normal">robots</th>
                 <th className="w-20 px-3 py-2 font-normal">inspect</th>
               </tr>
@@ -180,6 +182,12 @@ export function PageResultsTable({ audit }: { audit: AuditResult }) {
                           ? `${formatNumber(page.textChars)} chars · ${(page.snr * 100).toFixed(0)}%`
                           : "—"}
                       </td>
+                      <td className="px-3 py-2.5 font-mono text-[10px] text-muted">
+                        {page.outcome === "analyzed" ? freshnessLabel(page) : "—"}
+                      </td>
+                      <td className="px-3 py-2.5 font-mono text-[10px] text-muted">
+                        {page.outcome === "analyzed" ? faqLabel(page) : "—"}
+                      </td>
                       <td className="px-3 py-2.5">
                         {page.outcome === "analyzed" ? (
                           <span className="flex flex-wrap gap-1">
@@ -209,7 +217,7 @@ export function PageResultsTable({ audit }: { audit: AuditResult }) {
                     </tr>
                     {open ? (
                       <tr key={`${page.url}-detail`} className="bg-panel-2/40">
-                        <td colSpan={8} className="border-t border-line px-4 py-3">
+                        <td colSpan={10} className="border-t border-line px-4 py-3">
                           <PageChecks page={page} />
                         </td>
                       </tr>
@@ -279,6 +287,17 @@ function FocusPageCard({ page }: { page: PageAuditResult }) {
       </div>
     </section>
   );
+}
+
+function freshnessLabel(page: PageAuditResult): string {
+  if (!page.freshness) return "none";
+  const date = page.freshness.iso.slice(0, 10);
+  return `${date} · ${page.freshness.source}`;
+}
+
+function faqLabel(page: PageAuditResult): string {
+  if (page.faqPairs > 0) return `${page.faqPairs} pair${page.faqPairs === 1 ? "" : "s"}`;
+  return page.hasFaqSchema ? "schema only" : "none";
 }
 
 function PageChecks({ page }: { page: PageAuditResult }) {

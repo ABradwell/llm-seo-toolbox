@@ -311,7 +311,7 @@ export default async function Image() {
             }}
           >
             <span style={{ display: "flex", color: color.muted, fontSize: 15 }}>
-              20 checks · 8-page sample
+              49 checks · 8-page sample
             </span>
             <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
               <span style={{ display: "flex", color: color.muted, fontSize: 15 }}>score</span>

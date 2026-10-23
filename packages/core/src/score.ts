@@ -41,11 +41,12 @@ export function scorePillar(pillar: Pick<AuditPillar, "checks">): number {
   let totalWeight = 0;
 
   for (const check of pillar.checks) {
+    // Informational rows and unweighted per-bot rows are displayed but never scored.
+    if (check.weight <= 0) continue;
     const value = check.score ?? statusScore(check.status);
     if (value === null) continue;
-    const weight = check.weight > 0 ? check.weight : 1;
-    weighted += value * weight;
-    totalWeight += weight;
+    weighted += value * check.weight;
+    totalWeight += check.weight;
   }
 
   if (totalWeight === 0) return 0;

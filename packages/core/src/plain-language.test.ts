@@ -30,7 +30,7 @@ const JARGON = [
 
 describe("plain-language catalog", () => {
   it("covers every check id the engine emits", () => {
-    expect(ALL_IDS).toHaveLength(20);
+    expect(ALL_IDS).toHaveLength(49);
     for (const id of ALL_IDS) {
       expect(plainCatalogEntry(id), id).toBeDefined();
     }

@@ -1,0 +1,13 @@
+{
+  "linkset": [
+    {
+      "anchor": "/",
+      "service-desc": [
+        {
+          "href": "/openapi.json",
+          "type": "application/vnd.oai.openapi+json"
+        }
+      ]
+    }
+  ]
+}

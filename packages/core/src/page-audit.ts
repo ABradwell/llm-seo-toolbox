@@ -10,28 +10,34 @@ import type {
   PageAuditResult,
   PageOutcome,
   SiteType,
+  StructuredDataFormat,
 } from "./types";
 
 import { buildContentModel, SNR_PASS, SNR_WARN, type ContentModel } from "./content";
+import { collectDateSignals } from "./dates";
+import {
+  breadcrumbLists,
+  faqSchemaPairs,
+  hasFaqSchema as hasFaqSchemaNode,
+  identitySignals,
+  tokenOverlap,
+} from "./entities";
+import { detectFaqPairs } from "./faq";
 import { evaluateMetaRobots, evaluateXRobotsTag } from "./directives";
 import { gradeFor, scorePillar, scoreTone } from "./score";
 import { formatNumber, normalizeWhitespace } from "./format";
+import { extractMetadata, type PageMetadata } from "./metadata";
+import {
+  extractJsonLd,
+  extractStructuredData,
+  type JsonLdReport,
+  type StructuredDataNode,
+  type StructuredDataReport,
+} from "./structured-data";
+import { isSchemaType, matchesAnyType, placeholderFor, scoreSchemaDepth } from "./schema-depth";
 
-interface JsonLdBlock {
-  line: number | null;
-  valid: boolean;
-  types: string[];
-  hasContext: boolean;
-}
-
-export interface JsonLdReport {
-  valid: number;
-  invalid: number;
-  types: string[];
-  blocks: JsonLdBlock[];
-  firstValidLine: number | null;
-  firstBlockLine: number | null;
-}
+export { extractJsonLd, extractStructuredData };
+export type { JsonLdReport, StructuredDataReport };
 
 export interface AnalyzePageInput {
   page: AuditPage;
@@ -39,8 +45,12 @@ export interface AnalyzePageInput {
   headers: Record<string, string>;
   finalUrl?: string;
   recommendedSchema: string[];
+  requiredSchema?: string[];
   profileLabel: string;
   profileType: SiteType;
+  faqExpected?: boolean;
+  siteName?: string;
+  sitemapLastmod?: string | null;
   content?: ContentModel;
   source?: PageAuditResult["source"];
   fetchMs?: number;
@@ -90,59 +100,60 @@ function pathOf(value: string, fallback = "/"): string {
   }
 }
 
-export function extractJsonLd($: cheerio.CheerioAPI): JsonLdReport {
-  const blocks: JsonLdBlock[] = [];
-  const types = new Set<string>();
+function words(value: string): number {
+  const trimmed = normalizeWhitespace(value);
+  return trimmed ? trimmed.split(/\s+/).length : 0;
+}
 
-  const collectTypes = (value: unknown): void => {
-    if (Array.isArray(value)) {
-      value.forEach(collectTypes);
-      return;
-    }
-    if (!value || typeof value !== "object") return;
-    const record = value as Record<string, unknown>;
-    const type = record["@type"];
-    if (typeof type === "string") types.add(type);
-    if (Array.isArray(type)) {
-      type.forEach((entry) => {
-        if (typeof entry === "string") types.add(entry);
-      });
-    }
-    if (Array.isArray(record["@graph"])) record["@graph"].forEach(collectTypes);
-  };
+function median(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? Math.round((sorted[middle - 1] + sorted[middle]) / 2)
+    : sorted[middle];
+}
 
-  $('script[type="application/ld+json"]').each((_, element) => {
-    const raw = $(element).text().trim();
-    const line = sourceLine(element);
-    if (!raw) return;
+function contentScope($: cheerio.CheerioAPI, content: ContentModel) {
+  const scoped = content.scopeSelector === "body" ? null : $(content.scopeSelector).first();
+  return scoped && scoped.length > 0 ? scoped : $("body").first();
+}
 
-    try {
-      const parsed: unknown = JSON.parse(raw);
-      const record =
-        parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
-      collectTypes(parsed);
-      blocks.push({
-        line,
-        valid: true,
-        types: record && typeof record["@type"] === "string" ? [record["@type"]] : [],
-        hasContext: Boolean(record?.["@context"]),
-      });
-    } catch {
-      blocks.push({ line, valid: false, types: [], hasContext: false });
-    }
-  });
+function firstNodeLine(nodes: readonly StructuredDataNode[]): number | null {
+  return nodes.find((node) => node.line !== null)?.line ?? null;
+}
 
-  const validBlocks = blocks.filter((block) => block.valid);
-  const invalid = blocks.length - validBlocks.length;
+function formatsIn(report: StructuredDataReport): StructuredDataFormat[] {
+  return (Object.entries(report.formats) as [StructuredDataFormat, number][])
+    .filter(([, count]) => count > 0)
+    .map(([format]) => format);
+}
 
-  return {
-    valid: validBlocks.length,
-    invalid,
-    types: [...types],
-    blocks,
-    firstValidLine: validBlocks[0]?.line ?? null,
-    firstBlockLine: blocks[0]?.line ?? null,
-  };
+function setPath(target: Record<string, unknown>, path: string, value: unknown): void {
+  const segments = path.split(".");
+  let current = target;
+  for (let index = 0; index < segments.length - 1; index += 1) {
+    const segment = segments[index];
+    if (!current[segment] || typeof current[segment] !== "object") current[segment] = {};
+    current = current[segment] as Record<string, unknown>;
+  }
+  current[segments[segments.length - 1]] = value;
+}
+
+function schemaDepthFix(
+  result: ReturnType<typeof scoreSchemaDepth>,
+  requiredSchema: string[],
+): string {
+  const type = result.type ?? requiredSchema[0] ?? "Thing";
+  const payload: Record<string, unknown> = { "@context": "https://schema.org", "@type": type };
+  for (const path of [...result.present, ...result.missing]) {
+    const key = path === "proficiencyLevel|about" ? "about" : path;
+    setPath(payload, key, placeholderFor(key));
+  }
+  if (result.missing.length === 0 && Object.keys(payload).length === 2) {
+    payload.name = placeholderFor("name");
+  }
+  return JSON.stringify(payload, null, 2);
 }
 
 export function extractMetaRobots($: cheerio.CheerioAPI): { value: string; line: number | null } {
@@ -162,24 +173,57 @@ export function analyzePage(input: AnalyzePageInput): PageAuditResult {
   const path = pathOf(finalUrl);
   const $ = cheerio.load(input.html, { sourceCodeLocationInfo: true });
   const content = input.content ?? buildContentModel(input.html);
-  const jsonLd = extractJsonLd($);
+  const metadata = extractMetadata($, finalUrl);
+  const structured = extractStructuredData($);
   const metaRobots = extractMetaRobots($);
   const xRobotsTag = input.headers["x-robots-tag"]?.trim() || null;
+  const faqExpected = input.faqExpected ?? false;
+  const requiredSchema =
+    input.requiredSchema && input.requiredSchema.length > 0
+      ? input.requiredSchema
+      : input.recommendedSchema;
+  const dates = collectDateSignals({
+    metadata,
+    structured,
+    html: input.html,
+    headers: input.headers,
+    sitemapLastmod: input.sitemapLastmod ?? null,
+  });
 
   const title =
-    normalizeWhitespace($("head title").first().text()) ||
+    metadata.title ||
     normalizeWhitespace($('meta[property="og:title"]').attr("content") ?? "") ||
     input.page.label;
 
   const checks: AuditCheck[] = [
-    ...buildAccessChecks({ path, metaRobots, xRobotsTag }),
-    ...buildParseabilityChecks({ path, html: input.html, content }),
+    ...buildAccessChecks({ path, metaRobots, xRobotsTag, html: input.html }),
+    ...buildParseabilityChecks({
+      path,
+      html: input.html,
+      content,
+      metadata,
+      structured,
+      faqExpected,
+      profileType: input.profileType,
+      siteName: input.siteName ?? "",
+      finalUrl,
+    }),
     ...buildStructuredChecks({
       path,
-      jsonLd,
+      structured,
+      requiredSchema,
       recommendedSchema: input.recommendedSchema,
       profileLabel: input.profileLabel,
       profileType: input.profileType,
+      faqExpected,
+      finalUrl,
+    }),
+    ...buildDiscoveryChecks({
+      path,
+      metadata,
+      dates,
+      profileType: input.profileType,
+      finalUrl,
     }),
   ];
 
@@ -203,9 +247,16 @@ export function analyzePage(input: AnalyzePageInput): PageAuditResult {
     snr: content.snr,
     h1Count,
     headingCount: headings.length,
-    jsonLdTypes: jsonLd.types,
+    jsonLdTypes: structured.types,
+    structuredFormats: formatsIn(structured),
     metaRobots: metaRobots.value,
     xRobotsTag,
+    freshness: dates.modified ?? dates.published ?? dates.sitemap,
+    faqPairs: detectFaqPairs(input.html).pairs.length,
+    hasFaqSchema: hasFaqSchemaNode(structured),
+    identity: identitySignals(structured),
+    descriptionChars: metadata.description.length,
+    canonical: metadata.canonical?.href ?? null,
     fetchMs: input.fetchMs ?? 0,
   };
 }
@@ -228,8 +279,15 @@ export function failedPage(input: FailedPageInput): PageAuditResult {
     h1Count: 0,
     headingCount: 0,
     jsonLdTypes: [],
+    structuredFormats: [],
     metaRobots: "",
     xRobotsTag: null,
+    freshness: null,
+    faqPairs: 0,
+    hasFaqSchema: false,
+    identity: [],
+    descriptionChars: 0,
+    canonical: null,
     error: input.error,
     fetchMs: input.fetchMs ?? 0,
   };
@@ -239,8 +297,9 @@ function buildAccessChecks(input: {
   path: string;
   metaRobots: { value: string; line: number | null };
   xRobotsTag: string | null;
+  html: string;
 }): AuditCheck[] {
-  const { path, metaRobots, xRobotsTag } = input;
+  const { path, metaRobots, xRobotsTag, html } = input;
   const checks: AuditCheck[] = [];
 
   const metaVerdict = evaluateMetaRobots(metaRobots.value);
@@ -252,7 +311,7 @@ function buildAccessChecks(input: {
       summary: metaVerdict.summary,
       detail: metaVerdict.detail,
       protocol: "HTML robots meta directives",
-      evidence: evidenceAt(path, metaRobots.line),
+      evidence: evidenceAt(path, metaRobots.line, html),
       recommendation:
         metaVerdict.status === "pass"
           ? undefined
@@ -305,12 +364,30 @@ function buildParseabilityChecks(input: {
   path: string;
   html: string;
   content: ContentModel;
+  metadata: PageMetadata;
+  structured: StructuredDataReport;
+  faqExpected: boolean;
+  profileType: SiteType;
+  siteName: string;
+  finalUrl: string;
 }): AuditCheck[] {
-  const { path, html, content } = input;
+  const {
+    path,
+    html,
+    content,
+    metadata,
+    structured,
+    faqExpected,
+    profileType,
+    siteName,
+    finalUrl,
+  } = input;
   const checks: AuditCheck[] = [];
   const { headings } = content;
   const h1Count = headings.filter((heading) => heading.level === 1).length;
   const firstH1 = headings.find((heading) => heading.level === 1) ?? headings[0] ?? null;
+  const $ = cheerio.load(html, { sourceCodeLocationInfo: true });
+  const scope = contentScope($, content);
 
   checks.push(
     check({
@@ -456,46 +533,543 @@ function buildParseabilityChecks(input: {
     }),
   );
 
+  checks.push(
+    ...buildAnswerabilityChecks({
+      path,
+      html,
+      content,
+      scope,
+      $,
+      structured,
+      faqExpected,
+    }),
+  );
+
+  checks.push(buildPageMetadataCheck({ path, html, metadata, siteName }));
+  checks.push(buildImageAltCheck({ path, html, scope, profileType }));
+  checks.push(buildCitableEvidenceCheck({ path, content, scope, profileType, finalUrl }));
+
   return checks;
+}
+
+function buildAnswerabilityChecks(input: {
+  path: string;
+  html: string;
+  content: ContentModel;
+  scope: ReturnType<typeof contentScope>;
+  $: cheerio.CheerioAPI;
+  structured: StructuredDataReport;
+  faqExpected: boolean;
+}): AuditCheck[] {
+  const { path, html, content, scope, $, structured, faqExpected } = input;
+  const checks: AuditCheck[] = [];
+
+  // faq-content
+  const visible = detectFaqPairs(html);
+  const schemaPairs = faqSchemaPairs(structured);
+  const schemaMatched =
+    schemaPairs.length > 0 &&
+    schemaPairs.every((pair) => tokenOverlap(pair.answer, content.text) >= 0.8);
+  const faqSchemaLine =
+    structured.nodes.find((node) => node.types.includes("FAQPage"))?.line ?? null;
+
+  let faqStatus: CheckStatus;
+  if (visible.pairs.length >= 3 || (schemaPairs.length >= 3 && schemaMatched)) {
+    faqStatus = "pass";
+  } else if (visible.pairs.length > 0 || schemaPairs.length > 0) {
+    faqStatus = "warn";
+  } else {
+    faqStatus = faqExpected ? "fail" : "info";
+  }
+
+  const faqSummary =
+    visible.pairs.length > 0
+      ? plural(visible.pairs.length, "visible Q&A pair")
+      : schemaPairs.length > 0
+        ? plural(schemaPairs.length, "schema Q&A pair")
+        : "None found";
+  const faqDetail =
+    faqStatus === "pass"
+      ? `${visible.pairs.length >= 3 ? `${plural(visible.pairs.length, "visible question-and-answer pair")} were found` : `${plural(schemaPairs.length, "FAQPage answer")} match the visible page text`}.`
+      : faqStatus === "info"
+        ? "No visible FAQ was found. FAQ content is not weighted for this profile."
+        : visible.pairs.length > 0
+          ? `Only ${plural(visible.pairs.length, "question-and-answer pair")} were found. Three or more give a model enough to quote.`
+          : schemaPairs.length > 0
+            ? "A FAQPage block exists, but its answers do not match the visible page text closely enough to be quotable."
+            : "No visible question-and-answer content was found on the page.";
+
+  checks.push(
+    check({
+      id: "faq-content",
+      label: "Visible FAQ content",
+      status: faqStatus,
+      summary: faqSummary,
+      detail: faqDetail,
+      protocol: "Visible Q&A · FAQPage mainEntity",
+      evidence: evidenceAt(
+        path,
+        visible.pairs[0]?.line ?? faqSchemaLine ?? firstNodeLine(structured.nodes),
+        html,
+      ),
+      recommendation:
+        faqStatus === "pass" || faqStatus === "info"
+          ? undefined
+          : "Add a short FAQ to the pages people ask about most: three questions with one-paragraph answers in the HTML.",
+      fix:
+        faqStatus === "pass" || faqStatus === "info"
+          ? undefined
+          : fix(
+              "html",
+              `<section aria-labelledby="faq">
+  <h2 id="faq">Frequently asked questions</h2>
+  <h3>What does it cost?</h3>
+  <p>A direct answer in one paragraph, visible without JavaScript.</p>
+  <h3>How long does setup take?</h3>
+  <p>A direct answer in one paragraph, visible without JavaScript.</p>
+  <h3>Can I cancel at any time?</h3>
+  <p>A direct answer in one paragraph, visible without JavaScript.</p>
+</section>
+
+<script type="application/ld+json">
+${JSON.stringify(
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: [
+      {
+        "@type": "Question",
+        name: "What does it cost?",
+        acceptedAnswer: { "@type": "Answer", text: "A direct answer in one paragraph." },
+      },
+    ],
+  },
+  null,
+  2,
+)}
+</script>`,
+            ),
+      weight: faqExpected ? 2 : 0.5,
+    }),
+  );
+
+  // answer-first
+  const ordered = scope.find("h1, h2, p").toArray();
+  const h1Index = ordered.findIndex(
+    (element) => $(element).prop("tagName")?.toLowerCase() === "h1",
+  );
+  const afterH1 = h1Index === -1 ? ordered : ordered.slice(h1Index + 1);
+  const firstHeadingAfter = afterH1.findIndex(
+    (element) => $(element).prop("tagName")?.toLowerCase() === "h2",
+  );
+  const beforeH2 = firstHeadingAfter === -1 ? afterH1 : afterH1.slice(0, firstHeadingAfter);
+  const firstParagraph = beforeH2.find(
+    (element) => $(element).prop("tagName")?.toLowerCase() === "p",
+  );
+  const summaryWords = firstParagraph ? words($(firstParagraph).text()) : 0;
+
+  let answerStatus: CheckStatus;
+  if (summaryWords >= 40 && summaryWords <= 160) answerStatus = "pass";
+  else if (firstParagraph) answerStatus = "warn";
+  else answerStatus = "fail";
+
+  checks.push(
+    check({
+      id: "answer-first",
+      label: "Answer-first summary",
+      status: answerStatus,
+      summary: firstParagraph ? `${summaryWords} word summary` : "No summary before H2",
+      detail:
+        answerStatus === "pass"
+          ? `A ${summaryWords}-word summary paragraph follows the H1 before the first section heading.`
+          : answerStatus === "warn"
+            ? `The first paragraph has ${summaryWords} words. A 40–160 word summary is easier for a model to quote.`
+            : "No prose paragraph appears between the H1 and the first H2, so the page opens with structure instead of an answer.",
+      protocol: "Answer-first content structure",
+      evidence: evidenceAt(
+        path,
+        firstParagraph ? sourceLine(firstParagraph) : content.scopeLine,
+        html,
+      ),
+      recommendation:
+        answerStatus === "pass"
+          ? undefined
+          : "Put one plain-language summary paragraph of 40–160 words directly under the H1.",
+      fix:
+        answerStatus === "pass"
+          ? undefined
+          : fix(
+              "html",
+              `<h1>Page topic</h1>
+<p>One paragraph of 40–160 words that answers the main question directly, before the first section heading.</p>
+<h2>Supporting detail</h2>`,
+            ),
+      weight: 1.5,
+    }),
+  );
+
+  // section-chunks
+  const nodes = scope.find("h2, h3").toArray();
+  const sections = nodes.map((heading, index) => {
+    const level = Number(String($(heading).prop("tagName") ?? "h2").replace(/\D/g, ""));
+    const parts: string[] = [];
+    let sibling = $(heading).next();
+    while (sibling.length > 0) {
+      const tag = String(sibling.prop("tagName") ?? "").toLowerCase();
+      const match = /^h([2-6])$/.exec(tag);
+      if (match && Number(match[1]) <= level) break;
+      parts.push(sibling.text());
+      sibling = sibling.next();
+    }
+    return {
+      words: words(parts.join(" ")),
+      line: sourceLine(heading),
+      index,
+    };
+  });
+  const sectionCount = nodes.length;
+  const medianWords = median(sections.map((section) => section.words));
+  const longest = sections.reduce(
+    (best, section) => (section.words > best.words ? section : best),
+    sections[0] ?? { words: 0, line: null, index: -1 },
+  );
+  const totalWords = words(content.text);
+
+  let chunkStatus: CheckStatus;
+  let chunkSummary: string;
+  let chunkDetail: string;
+  if (sectionCount === 0 && totalWords >= 1500) {
+    chunkStatus = "fail";
+    chunkSummary = "No H2 sections";
+    chunkDetail = `${formatNumber(totalWords)} words of prose have no H2 section headings, so an agent cannot split the page into quotable chunks.`;
+  } else if (sectionCount === 1 && totalWords >= 1500) {
+    chunkStatus = "warn";
+    chunkSummary = "One section only";
+    chunkDetail = `${formatNumber(totalWords)} words sit under one heading. Split the page into shorter sections.`;
+  } else if (longest.words > 1200) {
+    chunkStatus = "warn";
+    chunkSummary = `${formatNumber(longest.words)} word section`;
+    chunkDetail = `The longest section holds ${formatNumber(longest.words)} words. Sections over 1,200 words are harder for a model to quote precisely.`;
+  } else if (sectionCount >= 2 && (medianWords < 80 || medianWords > 500)) {
+    chunkStatus = "warn";
+    chunkSummary = `Median ${medianWords} words`;
+    chunkDetail = `The median section holds ${medianWords} words. A target of 80–500 words keeps sections chunk-friendly.`;
+  } else {
+    chunkStatus = "pass";
+    chunkSummary =
+      sectionCount === 0
+        ? "Short page, no sections"
+        : `${sectionCount} sections · median ${medianWords} words`;
+    chunkDetail =
+      sectionCount === 0
+        ? "The page is short enough that section splitting does not change how it is quoted."
+        : `Median section ${medianWords} words, longest ${formatNumber(longest.words)} words. Both sit inside the chunk-friendly range.`;
+  }
+
+  checks.push(
+    check({
+      id: "section-chunks",
+      label: "Chunk-friendly sections",
+      status: chunkStatus,
+      summary: chunkSummary,
+      detail: chunkDetail,
+      protocol: "Section length · 80–500 word median",
+      evidence: evidenceAt(
+        path,
+        chunkStatus === "pass"
+          ? nodes[0]
+            ? sourceLine(nodes[0])
+            : content.scopeLine
+          : (longest.line ?? content.scopeLine),
+        html,
+      ),
+      recommendation:
+        chunkStatus === "pass"
+          ? undefined
+          : "Split long prose under descriptive H2/H3 headings, aiming for 80–500 words per section.",
+      fix:
+        chunkStatus === "pass"
+          ? undefined
+          : fix(
+              "html",
+              `<h1>Page topic</h1>
+<p>Answer-first summary.</p>
+<h2>What it does</h2>
+<p>One focused section of 80–500 words.</p>
+<h2>How it works</h2>
+<p>One focused section of 80–500 words.</p>
+<h2>What it costs</h2>
+<p>One focused section of 80–500 words.</p>`,
+            ),
+      weight: 1,
+    }),
+  );
+
+  return checks;
+}
+
+function buildPageMetadataCheck(input: {
+  path: string;
+  html: string;
+  metadata: PageMetadata;
+  siteName: string;
+}): AuditCheck {
+  const { path, html, metadata, siteName } = input;
+  const titleLength = metadata.title.length;
+  const descriptionLength = metadata.description.length;
+  const titleOk = titleLength >= 15 && titleLength <= 70;
+  const descriptionOk = descriptionLength >= 50 && descriptionLength <= 160;
+  const langOk = Boolean(metadata.lang);
+  const titleDistinct =
+    !siteName ||
+    normalizeWhitespace(metadata.title).toLowerCase() !==
+      normalizeWhitespace(siteName).toLowerCase();
+
+  let status: CheckStatus;
+  let summary: string;
+  if (!metadata.title || !metadata.description) {
+    status = "fail";
+    summary = !metadata.title ? "Title missing" : "Description missing";
+  } else if (!titleOk || !descriptionOk || !langOk || !titleDistinct) {
+    status = "warn";
+    summary = `${titleLength} char title · ${descriptionLength} char description`;
+  } else {
+    status = "pass";
+    summary = `${titleLength} char title · ${descriptionLength} char description`;
+  }
+
+  const offendingLine = !metadata.title
+    ? null
+    : !titleOk || !titleDistinct
+      ? metadata.titleLine
+      : !metadata.description || !descriptionOk
+        ? metadata.descriptionLine
+        : !langOk
+          ? metadata.langLine
+          : metadata.titleLine;
+
+  return check({
+    id: "page-metadata",
+    label: "Page title and description",
+    status,
+    summary,
+    detail:
+      status === "pass"
+        ? `Title (${titleLength} chars), description (${descriptionLength} chars) and language (${metadata.lang}) are all present and in range.`
+        : `Title ${titleLength} chars (target 15–70${metadata.title ? "" : ", missing"}), description ${descriptionLength} chars (target 50–160${metadata.description ? "" : ", missing"}), language ${metadata.lang ?? "missing"}.`,
+    protocol: "HTML title, meta description, html lang",
+    evidence: evidenceAt(path, offendingLine, html),
+    recommendation:
+      status === "pass"
+        ? undefined
+        : "Give each page a unique 15–70 character title, a 50–160 character meta description and a lang attribute on <html>.",
+    fix:
+      status === "pass"
+        ? undefined
+        : fix(
+            "html",
+            `<html lang="en">
+<head>
+  <title>A specific page title under 70 characters</title>
+  <meta name="description" content="A 50–160 character summary that reads as a sentence and says what the page covers." />
+</head>`,
+          ),
+    weight: 1.5,
+  });
+}
+
+function buildImageAltCheck(input: {
+  path: string;
+  html: string;
+  scope: ReturnType<typeof contentScope>;
+  profileType: SiteType;
+}): AuditCheck {
+  const { path, html, scope, profileType } = input;
+  const images = scope
+    .find("img")
+    .toArray()
+    .filter((element) => {
+      const node = scope.find(element);
+      if ((node.attr("role") ?? "").toLowerCase() === "presentation") return false;
+      if ((node.attr("aria-hidden") ?? "").toLowerCase() === "true") return false;
+      const width = Number.parseInt(node.attr("width") ?? "", 10);
+      const height = Number.parseInt(node.attr("height") ?? "", 10);
+      if (width === 1 && height === 1) return false;
+      return true;
+    });
+
+  const described = images.filter((element) => {
+    const alt = scope.find(element).attr("alt")?.trim() ?? "";
+    return alt.length >= 4;
+  });
+  const coverage = images.length === 0 ? 100 : Math.round((described.length / images.length) * 100);
+
+  let status: CheckStatus;
+  if (images.length < 3) status = "pass";
+  else if (coverage >= 90) status = "pass";
+  else if (coverage >= 50) status = "warn";
+  else status = "fail";
+
+  const missing = images.find((element) => {
+    const alt = scope.find(element).attr("alt")?.trim() ?? "";
+    return alt.length < 4;
+  });
+
+  return check({
+    id: "image-alt",
+    label: "Image alt text",
+    status,
+    summary: images.length === 0 ? "No content images" : `${coverage}% described`,
+    detail:
+      images.length === 0
+        ? "The content region contains no images that need alt text."
+        : `${described.length} of ${plural(images.length, "content image")} have alt text of at least four characters. Decorative and tracking images are excluded.`,
+    protocol: "HTML img alt attribute",
+    evidence: evidenceAt(path, missing ? sourceLine(missing) : null, html),
+    recommendation:
+      status === "pass"
+        ? undefined
+        : "Give every meaningful image alt text that describes what it shows, not the file name.",
+    fix:
+      status === "pass"
+        ? undefined
+        : fix(
+            "html",
+            `<img src="/dashboard.png" alt="Dashboard showing answer coverage by crawler intent" width="1200" height="630" />`,
+          ),
+    weight: profileType === "portfolio" || profileType === "ecommerce" ? 1.5 : 0.5,
+  });
+}
+
+function buildCitableEvidenceCheck(input: {
+  path: string;
+  content: ContentModel;
+  scope: ReturnType<typeof contentScope>;
+  profileType: SiteType;
+  finalUrl: string;
+}): AuditCheck {
+  const { path, content, scope, profileType, finalUrl } = input;
+  const weighted = profileType === "blog-media" || profileType === "saas";
+
+  if (!weighted) {
+    return check({
+      id: "citable-evidence",
+      label: "Statistics and references",
+      status: "info",
+      summary: "Not scored",
+      detail:
+        "Numeric claims and outbound references are editorial signals scored for blogs and SaaS content only.",
+      protocol: "Editorial evidence heuristic",
+      weight: 0.5,
+    });
+  }
+
+  const claims = (
+    content.text.match(
+      /(?:\b\d[\d,.]*\s*(?:%|percent|million|billion|thousand|ms|s|kb|mb|gb|users|customers|countries|hours?|days?|years?)\b|[$€£]\s?\d[\d,.]*)/gi,
+    ) ?? []
+  ).length;
+  let origin = "";
+  try {
+    origin = new URL(finalUrl).origin;
+  } catch {
+    origin = "";
+  }
+  const outbound = scope
+    .find("a[href]")
+    .toArray()
+    .filter((element) => {
+      const href = scope.find(element).attr("href") ?? "";
+      if (!/^https?:\/\//i.test(href)) return false;
+      try {
+        return new URL(href).origin !== origin;
+      } catch {
+        return false;
+      }
+    }).length;
+  const totalWords = words(content.text);
+  const rate = totalWords === 0 ? 0 : claims / (totalWords / 500);
+
+  const status: CheckStatus = rate >= 2 && outbound >= 1 ? "pass" : "warn";
+
+  return check({
+    id: "citable-evidence",
+    label: "Statistics and references",
+    status,
+    summary: `${claims} numeric claims · ${outbound} outbound`,
+    detail: `${plural(claims, "numeric claim")} across ${formatNumber(totalWords)} words (${rate.toFixed(1)} per 500 words) and ${plural(outbound, "outbound reference")}. This is a heuristic, not a correctness score.`,
+    protocol: "Editorial evidence heuristic",
+    evidence: evidenceAt(path, content.scopeLine),
+    recommendation:
+      status === "pass"
+        ? undefined
+        : "Add concrete numbers, dates or measurements and link to the sources behind them. Editorial work, not a template change.",
+    weight: 0.5,
+  });
 }
 
 function buildStructuredChecks(input: {
   path: string;
-  jsonLd: JsonLdReport;
+  structured: StructuredDataReport;
+  requiredSchema: string[];
   recommendedSchema: string[];
   profileLabel: string;
   profileType: SiteType;
+  faqExpected: boolean;
+  finalUrl: string;
 }): AuditCheck[] {
-  const { path, jsonLd, recommendedSchema, profileLabel, profileType } = input;
+  const {
+    path,
+    structured,
+    requiredSchema,
+    recommendedSchema,
+    profileLabel,
+    profileType,
+    faqExpected,
+    finalUrl,
+  } = input;
   const checks: AuditCheck[] = [];
+  const formats = formatsIn(structured);
 
   const jsonLdStatus: CheckStatus =
-    jsonLd.valid > 0 ? "pass" : jsonLd.invalid > 0 ? "warn" : "fail";
-  const types = jsonLd.types.slice(0, 6);
+    structured.valid > 0
+      ? "pass"
+      : structured.nodes.length > 0
+        ? "warn"
+        : structured.invalid > 0
+          ? "warn"
+          : "fail";
+  const typeLabels = structured.types.slice(0, 6);
 
   checks.push(
     check({
       id: "json-ld",
-      label: "JSON-LD presence & syntax",
+      label: "Structured data presence & syntax",
       status: jsonLdStatus,
       summary:
-        jsonLd.valid > 0
-          ? `${plural(jsonLd.valid, "valid block")}`
-          : jsonLd.invalid > 0
-            ? "Invalid JSON"
-            : "Missing",
+        structured.valid > 0
+          ? plural(structured.valid, "valid block")
+          : formats.length > 0
+            ? `${formats.join(" + ")} only`
+            : structured.invalid > 0
+              ? "Invalid JSON"
+              : "Missing",
       detail:
-        jsonLd.valid > 0
-          ? `Valid structured data${types.length > 0 ? `: ${types.join(", ")}` : ""}.`
-          : jsonLd.invalid > 0
-            ? `${plural(jsonLd.invalid, "JSON-LD block")} could not be parsed.`
-            : "No JSON-LD structured data was found in the page head.",
-      protocol: "schema.org JSON-LD",
-      evidence: evidenceAt(path, jsonLd.firstBlockLine),
+        structured.valid > 0
+          ? `Valid JSON-LD${typeLabels.length > 0 ? `: ${typeLabels.join(", ")}` : ""}.`
+          : formats.length > 0
+            ? `Structured data was found as ${formats.join(" and ")}. It is readable, but JSON-LD is the format AI crawlers and search engines handle most consistently.`
+            : structured.invalid > 0
+              ? `${plural(structured.invalid, "structured data block")} could not be parsed.`
+              : "No JSON-LD, microdata or RDFa structured data was found in the page.",
+      protocol: "schema.org · JSON-LD, microdata, RDFa",
+      evidence: evidenceAt(path, structured.firstBlockLine ?? firstNodeLine(structured.nodes)),
       recommendation:
         jsonLdStatus === "pass"
           ? undefined
-          : "Add a JSON-LD block with @context and @type so the page can be classified without guessing.",
+          : structured.nodes.length > 0
+            ? "Keep the microdata or RDFa, and add an equivalent JSON-LD block so parsers get the same facts in the preferred format."
+            : "Add a JSON-LD block with @context and @type so the page can be classified without guessing.",
       fix:
         jsonLdStatus === "pass"
           ? undefined
@@ -504,8 +1078,8 @@ function buildStructuredChecks(input: {
               JSON.stringify(
                 {
                   "@context": "https://schema.org",
-                  "@type": recommendedSchema[0] ?? "TechArticle",
-                  headline: "Page topic",
+                  "@type": requiredSchema[0] ?? recommendedSchema[0] ?? "TechArticle",
+                  name: "Your site or page",
                   description: "One-sentence summary of the page.",
                 },
                 null,
@@ -516,29 +1090,40 @@ function buildStructuredChecks(input: {
     }),
   );
 
-  const present = recommendedSchema.filter((type) => jsonLd.types.includes(type));
-  const schemaStatus: CheckStatus =
-    present.length > 0 ? "pass" : jsonLd.valid > 0 ? "warn" : "fail";
-  const expected =
-    recommendedSchema.length > 2
-      ? `${recommendedSchema.slice(0, -1).join(", ")} or ${recommendedSchema[recommendedSchema.length - 1]}`
-      : recommendedSchema.join(" or ");
+  const requiredMatch = matchesAnyType(structured.types, requiredSchema);
+  const recommendedPresent = recommendedSchema.filter((type) =>
+    structured.types.some((candidate) => isSchemaType(candidate, type)),
+  );
+  const hasRequired = requiredMatch !== null;
+  const needsDepth = faqExpected && recommendedPresent.length < 2;
+
+  let schemaStatus: CheckStatus;
+  if (hasRequired && !needsDepth) schemaStatus = "pass";
+  else if (hasRequired || recommendedPresent.length > 0) schemaStatus = "warn";
+  else schemaStatus = "fail";
+
+  const expected = requiredSchema.join(" or ");
+  const schemaSummary = hasRequired
+    ? requiredMatch
+    : recommendedPresent.length > 0
+      ? `${recommendedPresent.join(", ")} only`
+      : `0 / ${requiredSchema.length} required`;
 
   checks.push(
     check({
       id: "schema-types",
       label: "Profile schema types",
       status: schemaStatus,
-      summary: present.length > 0 ? present.join(", ") : `0 / ${recommendedSchema.length} found`,
-      detail: `The ${profileLabel} profile expects ${expected}. Found: ${
-        jsonLd.types.length > 0 ? jsonLd.types.join(", ") : "none"
-      }.`,
-      protocol: `schema.org · ${recommendedSchema.join(" / ")}`,
-      evidence: evidenceAt(path, jsonLd.firstValidLine ?? jsonLd.firstBlockLine),
+      summary: schemaSummary,
+      detail: `The ${profileLabel} profile requires ${expected}. Found: ${
+        structured.types.length > 0 ? structured.types.join(", ") : "none"
+      }.${needsDepth ? ` Recommended depth types are ${recommendedSchema.join(", ")}.` : ""}`,
+      protocol: `schema.org · ${requiredSchema.join(" / ")}`,
+      evidence: evidenceAt(path, structured.firstValidLine ?? firstNodeLine(structured.nodes)),
       recommendation:
         schemaStatus === "pass"
           ? undefined
-          : `Add a ${recommendedSchema[0]} object (or an equivalent ${profileLabel.toLowerCase()} type) to the page's JSON-LD.`,
+          : `Add a ${requiredSchema[0]} object (or an equivalent ${profileLabel.toLowerCase()} type) to the page's JSON-LD.`,
       fix:
         schemaStatus === "pass"
           ? undefined
@@ -547,7 +1132,7 @@ function buildStructuredChecks(input: {
               JSON.stringify(
                 {
                   "@context": "https://schema.org",
-                  "@type": recommendedSchema[0] ?? "TechArticle",
+                  "@type": requiredSchema[0] ?? "TechArticle",
                   name: "Your site or page",
                   description: "One-sentence summary matched to this profile.",
                   ...(profileType === "local-business"
@@ -576,6 +1161,258 @@ function buildStructuredChecks(input: {
               ),
             ),
       weight: 1.5,
+    }),
+  );
+
+  const depth = scoreSchemaDepth(structured, requiredSchema);
+  const depthStatus: CheckStatus =
+    depth.percentage >= 80 ? "pass" : depth.percentage >= 40 ? "warn" : "fail";
+  checks.push(
+    check({
+      id: "schema-depth",
+      label: "Schema property depth",
+      status: depthStatus,
+      summary:
+        depth.required.length === 0
+          ? "No matching type"
+          : `${depth.percentage}% · ${depth.missing.length} missing`,
+      detail:
+        depth.required.length === 0
+          ? "No structured data type with a required-property table was found on the page."
+          : `${depth.present.length} of ${plural(depth.required.length, "required property", "required properties")} are present on the primary ${depth.type} node.${depth.missing.length > 0 ? ` Missing: ${depth.missing.join(", ")}.` : ""}`,
+      protocol: `schema.org · ${depth.type ?? requiredSchema[0] ?? "required properties"}`,
+      evidence: evidenceAt(path, depth.node?.line ?? firstNodeLine(structured.nodes)),
+      recommendation:
+        depthStatus === "pass"
+          ? undefined
+          : "Fill in the missing properties on the primary structured data node so an agent can answer factual questions without guessing.",
+      fix: depthStatus === "pass" ? undefined : fix("json", schemaDepthFix(depth, requiredSchema)),
+      weight: 1.5,
+    }),
+  );
+
+  const lists = breadcrumbLists(structured);
+  const segments = path.split("/").filter(Boolean).length;
+  const pageUrl = finalUrl.replace(/\/$/, "");
+  const lastItem = lists[0]?.items[lists[0].items.length - 1] ?? null;
+  const lastItemMatches =
+    lastItem?.url !== null &&
+    lastItem?.url !== undefined &&
+    lastItem.url.replace(/\/$/, "") === pageUrl;
+
+  let breadcrumbStatus: CheckStatus;
+  let breadcrumbSummary: string;
+  let breadcrumbDetail: string;
+  if (lists.length === 0) {
+    if (segments === 0) {
+      breadcrumbStatus = "info";
+      breadcrumbSummary = "Homepage";
+      breadcrumbDetail = "The homepage does not need a breadcrumb trail.";
+    } else if (segments >= 2) {
+      breadcrumbStatus = "warn";
+      breadcrumbSummary = "Missing";
+      breadcrumbDetail = `This page is ${segments} levels deep and has no BreadcrumbList, so an agent cannot see where it sits in the site.`;
+    } else {
+      breadcrumbStatus = "info";
+      breadcrumbSummary = "Not needed";
+      breadcrumbDetail = "A top-level page does not need a breadcrumb trail.";
+    }
+  } else if (lastItemMatches) {
+    breadcrumbStatus = "pass";
+    breadcrumbSummary = plural(lists[0].items.length, "breadcrumb");
+    breadcrumbDetail = "The BreadcrumbList ends at this page URL.";
+  } else {
+    breadcrumbStatus = "warn";
+    breadcrumbSummary = "Mismatched trail";
+    breadcrumbDetail =
+      "A BreadcrumbList exists, but its last item does not point at this page URL.";
+  }
+
+  checks.push(
+    check({
+      id: "breadcrumbs",
+      label: "Breadcrumb trail",
+      status: breadcrumbStatus,
+      summary: breadcrumbSummary,
+      detail: breadcrumbDetail,
+      protocol: "schema.org · BreadcrumbList",
+      evidence: evidenceAt(path, lists[0]?.line ?? null),
+      recommendation:
+        breadcrumbStatus === "warn"
+          ? "Add a BreadcrumbList whose last item points at the page URL."
+          : undefined,
+      fix:
+        breadcrumbStatus === "warn"
+          ? fix(
+              "json",
+              JSON.stringify(
+                {
+                  "@context": "https://schema.org",
+                  "@type": "BreadcrumbList",
+                  itemListElement: [
+                    {
+                      "@type": "ListItem",
+                      position: 1,
+                      name: "Home",
+                      item: new URL("/", finalUrl).toString(),
+                    },
+                    {
+                      "@type": "ListItem",
+                      position: 2,
+                      name: "Current page",
+                      item: finalUrl,
+                    },
+                  ],
+                },
+                null,
+                2,
+              ),
+            )
+          : undefined,
+      weight: 0.5,
+    }),
+  );
+
+  return checks;
+}
+
+function buildDiscoveryChecks(input: {
+  path: string;
+  metadata: PageMetadata;
+  dates: ReturnType<typeof collectDateSignals>;
+  profileType: SiteType;
+  finalUrl: string;
+}): AuditCheck[] {
+  const { path, metadata, dates, profileType, finalUrl } = input;
+  const checks: AuditCheck[] = [];
+  const freshnessWeight = profileType === "blog-media" || profileType === "docs" ? 2.5 : 1.5;
+  const freshnessExpected = profileType === "blog-media" || profileType === "docs";
+  const freshest = dates.modified ?? dates.published ?? dates.sitemap;
+  const modified = dates.modified;
+  const sitemap = dates.sitemap;
+  const daysFromSitemap =
+    modified && sitemap
+      ? Math.abs(new Date(modified.iso).getTime() - new Date(sitemap.iso).getTime()) / 86_400_000
+      : null;
+  const monthsOld = freshest
+    ? (Date.now() - new Date(freshest.iso).getTime()) / (1000 * 60 * 60 * 24 * 30.44)
+    : null;
+
+  let freshnessStatus: CheckStatus;
+  let freshnessSummary: string;
+  let freshnessDetail: string;
+  if (!freshest) {
+    freshnessStatus = freshnessExpected ? "fail" : "info";
+    freshnessSummary = "No date signal";
+    freshnessDetail = freshnessExpected
+      ? "No machine-readable published or modified date was found, and this profile relies on dated content."
+      : "No machine-readable date was found. Dates are optional for this profile.";
+  } else if (!modified) {
+    freshnessStatus = "warn";
+    freshnessSummary = `Published ${Math.max(0, Math.round(monthsOld ?? 0))} months ago`;
+    freshnessDetail =
+      "Only a published date is present. A dateModified signal tells an agent the page is current.";
+  } else if (monthsOld !== null && monthsOld > 18) {
+    freshnessStatus = "warn";
+    freshnessSummary = `Modified ${Math.round(monthsOld)} months ago`;
+    freshnessDetail =
+      "The freshest modified date is older than 18 months, so the page may look stale to an agent.";
+  } else if (daysFromSitemap !== null && daysFromSitemap > 7) {
+    freshnessStatus = "warn";
+    freshnessSummary = `Sitemap differs by ${Math.round(daysFromSitemap)} days`;
+    freshnessDetail = `The page says it was modified ${modified.iso.slice(0, 10)}, while the sitemap lastmod says ${sitemap?.iso.slice(0, 10)}. Keep the two signals in step.`;
+  } else {
+    freshnessStatus = "pass";
+    freshnessSummary =
+      monthsOld === null ? "Dated" : `Modified ${Math.max(0, Math.round(monthsOld))} months ago`;
+    freshnessDetail =
+      daysFromSitemap === null
+        ? "A machine-readable modified date is present and recent."
+        : `A machine-readable modified date is present and the sitemap lastmod agrees within ${Math.max(0, Math.round(daysFromSitemap))} days.`;
+  }
+
+  checks.push(
+    check({
+      id: "freshness",
+      label: "Freshness signals",
+      status: freshnessStatus,
+      summary: freshnessSummary,
+      detail: freshnessDetail,
+      protocol: "schema.org dateModified · article:modified_time · sitemap lastmod",
+      evidence: evidenceAt(path, freshest?.line ?? null),
+      recommendation:
+        freshnessStatus === "pass" || freshnessStatus === "info"
+          ? undefined
+          : "Publish a machine-readable dateModified on each page, keep it close to the sitemap lastmod, and refresh the page when the facts change.",
+      fix:
+        freshnessStatus === "pass" || freshnessStatus === "info"
+          ? undefined
+          : fix(
+              "json",
+              JSON.stringify(
+                {
+                  "@context": "https://schema.org",
+                  "@type": profileType === "blog-media" ? "Article" : "WebPage",
+                  dateModified: new Date().toISOString(),
+                },
+                null,
+                2,
+              ),
+            ),
+      weight: freshnessWeight,
+    }),
+  );
+
+  const canonical = metadata.canonical;
+  let canonicalStatus: CheckStatus;
+  let canonicalSummary: string;
+  let canonicalDetail: string;
+  if (!canonical) {
+    canonicalStatus = "warn";
+    canonicalSummary = "Missing";
+    canonicalDetail =
+      "No canonical link was found, so an agent has to infer which URL is authoritative.";
+  } else if (!canonical.absolute) {
+    canonicalStatus = "warn";
+    canonicalSummary = `Relative · ${canonical.href}`;
+    canonicalDetail = "The canonical link is relative. Publish an absolute same-origin URL.";
+  } else {
+    let sameOrigin = false;
+    try {
+      sameOrigin = new URL(canonical.href).origin === new URL(finalUrl).origin;
+    } catch {
+      sameOrigin = false;
+    }
+    if (sameOrigin) {
+      canonicalStatus = "pass";
+      canonicalSummary = pathOf(canonical.href);
+      canonicalDetail =
+        "The canonical URL is absolute, same-origin and authoritative for this page.";
+    } else {
+      canonicalStatus = "fail";
+      canonicalSummary = "Off-origin";
+      canonicalDetail = `The canonical points at ${canonical.href}, which is outside the audited origin.`;
+    }
+  }
+
+  checks.push(
+    check({
+      id: "canonical",
+      label: "Canonical URL",
+      status: canonicalStatus,
+      summary: canonicalSummary,
+      detail: canonicalDetail,
+      protocol: "HTML link rel=canonical",
+      evidence: evidenceAt(path, metadata.canonicalLine),
+      recommendation:
+        canonicalStatus === "pass"
+          ? undefined
+          : "Add an absolute, same-origin canonical link to each page and point it at the authoritative URL.",
+      fix:
+        canonicalStatus === "pass"
+          ? undefined
+          : fix("html", `<link rel="canonical" href="${finalUrl.replace(/\/$/, "")}" />`),
+      weight: 1,
     }),
   );
 

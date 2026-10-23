@@ -95,6 +95,33 @@ export interface AuditReport {
   meta: AuditResult["meta"];
 }
 
+export interface AccessIntentSummary {
+  search: string | null;
+  fetch: string | null;
+  training: string | null;
+  firewall: string | null;
+}
+
+/**
+ * One line that reports the three crawler intent groups and the live firewall
+ * result. Shared by the CLI summary, the plain brief and the Action comment.
+ */
+export function accessIntentLine(report: Pick<AuditReport, "checks">): string | null {
+  const find = (id: string) => report.checks.find((check) => check.id === id);
+  const parts: string[] = [];
+  const search = find("access-search");
+  const fetch = find("access-fetch");
+  const training = find("access-training");
+  const firewall = find("agent-fetch");
+
+  if (search) parts.push(`search ${search.summary}`);
+  if (fetch) parts.push(`fetch ${fetch.summary}`);
+  if (training) parts.push(`training ${training.summary}`);
+  if (firewall) parts.push(`firewall ${firewall.summary}`);
+
+  return parts.length > 0 ? `Access by intent: ${parts.join(" · ")}` : null;
+}
+
 export interface MarkdownReportOptions {
   /** HTML comment used to find and update a sticky GitHub comment. */
   marker?: string;
@@ -328,6 +355,9 @@ export function renderMarkdownReport(
     }`,
     "",
   );
+
+  const intent = accessIntentLine(report);
+  if (intent) lines.push(`**${intent}**`, "");
 
   if (includeFixes && report.fixes.length > 0) {
     lines.push("### Fix first", "");

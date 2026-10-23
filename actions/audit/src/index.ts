@@ -65,6 +65,9 @@ async function audit(inputs: ActionInputs): Promise<void> {
       siteType: inputs.siteType,
       timeoutMs: inputs.timeoutMs,
       userAgent: USER_AGENT,
+      headers: inputs.headers,
+      resolveLinks: inputs.resolveLinks,
+      agentFetch: inputs.agentFetch,
       cache: false,
     });
     report = buildReport(result, {

@@ -1,4 +1,5 @@
 import type { AuditReport } from "@llm-seo-toolbox/core";
+import { accessIntentLine } from "@llm-seo-toolbox/core";
 
 import type { Palette } from "../color";
 
@@ -27,6 +28,9 @@ export function renderSummary(report: AuditReport, palette: Palette): string {
     pillars,
     `${counts.pass} pass · ${counts.warn} warn · ${counts.fail} fail`,
   ];
+
+  const intent = accessIntentLine(report);
+  if (intent) lines.push(intent);
 
   const firstFix = report.fixes[0];
   if (firstFix) lines.push(`Fix first: ${firstFix.label} — ${firstFix.recommendation}`);

@@ -7,7 +7,12 @@ export interface SiteTypeDefinition {
   description: string;
   /** What this profile changes inside the audit. */
   auditNote: string;
+  /** At least one of these types must be present for `schema-types` to pass. */
+  requiredSchema: readonly string[];
+  /** Types that deepen the profile match. */
   recommendedSchema: readonly string[];
+  /** Whether FAQ content is weighted for this profile. */
+  faqExpected: boolean;
   openApiRelevant: boolean;
 }
 
@@ -22,8 +27,10 @@ export const SITE_TYPES: readonly SiteTypeDefinition[] = [
     shortLabel: "SaaS",
     description: "Software products, platforms and developer tools sold directly online.",
     auditNote:
-      "OpenAPI is scored. Schema expectations focus on SoftwareApplication, WebApplication and FAQPage.",
-    recommendedSchema: ["SoftwareApplication", "WebApplication", "FAQPage"],
+      "OpenAPI is scored. Schema expectations require SoftwareApplication or WebApplication, with FAQPage and Organization as depth signals.",
+    requiredSchema: ["SoftwareApplication", "WebApplication"],
+    recommendedSchema: ["SoftwareApplication", "WebApplication", "FAQPage", "Organization"],
+    faqExpected: true,
     openApiRelevant: true,
   },
   {
@@ -33,8 +40,10 @@ export const SITE_TYPES: readonly SiteTypeDefinition[] = [
     description:
       "A personal or studio body of work: designers, photographers, artists, freelancers.",
     auditNote:
-      "OpenAPI is not scored. Schema expectations focus on Person, ProfilePage and CreativeWork.",
+      "OpenAPI is not scored. Schema expectations require Person, with ProfilePage and CreativeWork as depth signals.",
+    requiredSchema: ["Person"],
     recommendedSchema: ["Person", "ProfilePage", "CreativeWork"],
+    faqExpected: false,
     openApiRelevant: false,
   },
   {
@@ -43,8 +52,10 @@ export const SITE_TYPES: readonly SiteTypeDefinition[] = [
     shortLabel: "Docs",
     description: "Documentation, API references, guides and technical knowledge bases.",
     auditNote:
-      "OpenAPI is scored. Schema expectations focus on TechArticle, APIReference and FAQPage.",
-    recommendedSchema: ["TechArticle", "APIReference", "FAQPage"],
+      "OpenAPI is scored. Schema expectations require TechArticle or APIReference, with FAQPage and BreadcrumbList as depth signals.",
+    requiredSchema: ["TechArticle", "APIReference"],
+    recommendedSchema: ["TechArticle", "APIReference", "FAQPage", "BreadcrumbList"],
+    faqExpected: true,
     openApiRelevant: true,
   },
   {
@@ -52,8 +63,11 @@ export const SITE_TYPES: readonly SiteTypeDefinition[] = [
     label: "E-commerce",
     shortLabel: "Store",
     description: "Product catalogues, retail stores and transactional shopping pages.",
-    auditNote: "OpenAPI is not scored. Schema expectations focus on Product, Offer and ItemList.",
-    recommendedSchema: ["Product", "Offer", "ItemList"],
+    auditNote:
+      "OpenAPI is not scored. Schema expectations require Product, with Offer, BreadcrumbList and FAQPage as depth signals.",
+    requiredSchema: ["Product"],
+    recommendedSchema: ["Product", "Offer", "BreadcrumbList", "FAQPage"],
+    faqExpected: true,
     openApiRelevant: false,
   },
   {
@@ -62,8 +76,10 @@ export const SITE_TYPES: readonly SiteTypeDefinition[] = [
     shortLabel: "Local",
     description: "A physical or regional service business with a location and opening hours.",
     auditNote:
-      "OpenAPI is not scored. Schema expectations focus on LocalBusiness, Service and FAQPage.",
+      "OpenAPI is not scored. Schema expectations require a LocalBusiness subtype, with Service and FAQPage as depth signals.",
+    requiredSchema: ["LocalBusiness"],
     recommendedSchema: ["LocalBusiness", "Service", "FAQPage"],
+    faqExpected: true,
     openApiRelevant: false,
   },
   {
@@ -72,8 +88,10 @@ export const SITE_TYPES: readonly SiteTypeDefinition[] = [
     shortLabel: "Media",
     description: "News, publications, editorial blogs and long-form content.",
     auditNote:
-      "OpenAPI is not scored. Schema expectations focus on Article, NewsArticle and BlogPosting.",
-    recommendedSchema: ["Article", "NewsArticle", "BlogPosting"],
+      "OpenAPI is not scored. Schema expectations require an Article subtype, with Person and Organization as depth signals.",
+    requiredSchema: ["Article"],
+    recommendedSchema: ["Article", "NewsArticle", "BlogPosting", "Person", "Organization"],
+    faqExpected: false,
     openApiRelevant: false,
   },
 ];

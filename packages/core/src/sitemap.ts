@@ -5,6 +5,8 @@ export interface SitemapParseResult {
   kind: "urlset" | "sitemapindex" | "unknown";
   urls: string[];
   sitemaps: string[];
+  /** URL → `lastmod` value for urlset entries that declare one. */
+  lastmods: Record<string, string>;
 }
 
 function decodeXmlEntities(value: string): string {
@@ -37,10 +39,29 @@ export function parseSitemap(xml: string): SitemapParseResult {
     }
   });
 
+  const lastmods: Record<string, string> = {};
+  if (kind === "urlset") {
+    for (const match of xml.matchAll(/<url\b[\s\S]*?<\/url>/gi)) {
+      const block = match[0];
+      const loc = /<loc>\s*([\s\S]*?)\s*<\/loc>/i.exec(block)?.[1];
+      const lastmod = /<lastmod>\s*([\s\S]*?)\s*<\/lastmod>/i.exec(block)?.[1];
+      if (!loc || !lastmod) continue;
+      const url = decodeXmlEntities(loc);
+      try {
+        const parsed = new URL(url);
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") continue;
+        lastmods[url] = decodeXmlEntities(lastmod);
+      } catch {
+        // Ignore malformed URLs.
+      }
+    }
+  }
+
   return {
     kind,
     urls: kind === "sitemapindex" ? [] : dedupe(valid),
     sitemaps: kind === "sitemapindex" ? dedupe(valid) : [],
+    lastmods,
   };
 }
 

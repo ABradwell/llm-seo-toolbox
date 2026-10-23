@@ -2,6 +2,7 @@ import * as cheerio from "cheerio";
 import { NodeHtmlMarkdown } from "node-html-markdown";
 
 import type {
+  AgentFetchComparison,
   AuditCheck,
   AuditCoverage,
   AuditFix,
@@ -12,8 +13,10 @@ import type {
   CheckEvidence,
   CheckFix,
   CheckStatus,
+  CrawlerIntent,
   DiscoveryFile,
   FixLanguage,
+  FreshnessSignal,
   PageAuditResult,
   RemovedNoise,
   SiteClassification,
@@ -23,15 +26,26 @@ import type {
 } from "./types";
 
 import { aggregatePageChecks, directPageChecks } from "./aggregate";
+import { compareAgentFetch, crawlerUserAgent } from "./agent-fetch";
 import { classifySite } from "./classifier";
 import { buildContentModel, type ContentModel } from "./content";
+import { crawlersByIntent } from "./crawlers";
 import { fetchText, type FetchTextOutcome } from "./fetch-page";
 import { sectionForPath } from "./llms";
-import { validateLlmsTxt, type LlmsTxtValidation } from "./llms-txt";
+import {
+  extractLlmsTxtLinks,
+  llmsTxtCoverage,
+  resolveLlmsTxtLinks,
+  validateLlmsTxt,
+  type LlmsResolvedLink,
+  type LlmsTxtCoverage,
+  type LlmsTxtValidation,
+} from "./llms-txt";
+import { extractMetadata, type PageMetadata } from "./metadata";
 import { analyzePage, extractJsonLd, failedPage } from "./page-audit";
 import {
   AI_CRAWLERS,
-  crawlerAccess,
+  crawlerAccessOnPaths,
   emptyRobots,
   hasExplicitAiPolicy,
   parseRobots,
@@ -71,11 +85,20 @@ export interface AnalyzeOptions {
   userAgent?: string;
   /** Set to false to bypass the in-process result cache (used by the CLI). */
   cache?: boolean;
+  /** Set to false to skip the optional HEAD checks on llms.txt links. */
+  resolveLinks?: boolean;
+  /** Set to false to skip the live AI user-agent fetch comparison. */
+  agentFetch?: boolean;
+  /** Extra request headers, used for protected previews and staging hosts. */
+  headers?: Record<string, string>;
 }
+
+const SCORING_VERSION = "site-2" as const;
 
 interface FetchSettings {
   timeoutMs: number;
   userAgent?: string;
+  headers?: Record<string, string>;
 }
 
 export class AuditError extends Error {
@@ -107,6 +130,8 @@ interface SiteBase {
   pageResults: PageAuditResult[];
   seedPage: PageAuditResult;
   seedVision: VisionPayload;
+  freshness: FreshnessSignal | null;
+  agentFetch: AgentFetchComparison[];
   crawledAt: string;
 }
 
@@ -211,6 +236,7 @@ interface SitemapBudget {
   lastStatus: number | null;
   foundXml: boolean;
   firstUrlLine: number | null;
+  lastmods: Record<string, string>;
 }
 
 async function expandSitemap(
@@ -228,6 +254,7 @@ async function expandSitemap(
     accept: "application/xml,text/xml,application/xhtml+xml,*/*;q=0.5",
     timeoutMs: settings.timeoutMs,
     userAgent: settings.userAgent,
+    headers: settings.headers,
     maxBytes: 4_000_000,
   });
 
@@ -240,6 +267,10 @@ async function expandSitemap(
   budget.foundXml = true;
   if (budget.firstUrlLine === null && parsed.urls.length > 0) {
     budget.firstUrlLine = lineOfFirstMatch(response.body, /<loc[\s>]/i) ?? 1;
+  }
+
+  for (const [pageUrl, lastmod] of Object.entries(parsed.lastmods)) {
+    budget.lastmods[pageUrl] = lastmod;
   }
 
   if (parsed.kind === "urlset") return parsed.urls;
@@ -261,6 +292,8 @@ interface SitemapOutcome {
   bytes: number;
   primaryUrl: string;
   firstUrlLine: number | null;
+  /** URL → sitemap lastmod for every URL that declares one. */
+  lastmods: Record<string, string>;
 }
 
 async function loadSitemap(
@@ -276,6 +309,7 @@ async function loadSitemap(
     lastStatus: primary.status || null,
     foundXml: false,
     firstUrlLine: null,
+    lastmods: {},
   };
 
   const primaryUrl = new URL("/sitemap.xml", origin).toString();
@@ -324,6 +358,7 @@ async function loadSitemap(
     bytes: primary.bytes,
     primaryUrl: primaryUrlUsed,
     firstUrlLine: budget.firstUrlLine,
+    lastmods: budget.lastmods,
     note: found
       ? `${formatNumber(unique.length)} URLs across ${budget.fetched} file${budget.fetched === 1 ? "" : "s"}`
       : primary.status === 404
@@ -341,15 +376,121 @@ interface ProbeResult {
   detail: string;
 }
 
-async function probeOpenApi(origin: string, settings: FetchSettings): Promise<ProbeResult> {
-  const candidates = ["/openapi.json", "/.well-known/openapi.json", "/openapi.yaml"];
+interface WellKnownProbe extends ProbeResult {
+  entries: string[];
+  apiCatalog: boolean;
+  security: boolean;
+  /** OpenAPI descriptions advertised by the RFC 9727 API catalog. */
+  openApiLinks: string[];
+}
+
+interface ApiCatalogProbe {
+  found: boolean;
+  links: string[];
+  status: number | null;
+  bytes: number;
+  detail: string;
+}
+
+function linksetHrefs(value: unknown, origin: string): string[] {
+  const hrefs: string[] = [];
+
+  const visit = (entry: unknown): void => {
+    if (typeof entry === "string") {
+      hrefs.push(entry);
+      return;
+    }
+    if (!entry || typeof entry !== "object") return;
+    const record = entry as Record<string, unknown>;
+    const type = String(record.type ?? "").toLowerCase();
+    const href = typeof record.href === "string" ? record.href : null;
+    if (href && (/openapi|swagger|api\.(?:json|ya?ml)/i.test(href) || type.includes("openapi"))) {
+      try {
+        hrefs.push(new URL(href, origin).toString());
+      } catch {
+        // Ignore malformed catalog links.
+      }
+    }
+    for (const key of ["linkset", "service-desc", "service-doc", "describedby", "item"]) {
+      const nested = record[key];
+      if (Array.isArray(nested)) nested.forEach(visit);
+      else if (nested !== undefined) visit(nested);
+    }
+  };
+
+  if (Array.isArray(value)) value.forEach(visit);
+  else visit(value);
+  return [...new Set(hrefs)];
+}
+
+async function probeApiCatalog(origin: string, settings: FetchSettings): Promise<ApiCatalogProbe> {
+  const path = "/.well-known/api-catalog";
+  const response = await fetchText(new URL(path, origin), {
+    accept: "application/linkset+json,application/json,*/*;q=0.5",
+    timeoutMs: settings.timeoutMs,
+    userAgent: settings.userAgent,
+    headers: settings.headers,
+    maxBytes: 400_000,
+  });
+
+  if (!response.ok || looksLikeHtml(response.body)) {
+    return {
+      found: false,
+      links: [],
+      status: response.status || null,
+      bytes: response.bytes,
+      detail: "No RFC 9727 API catalog was found.",
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(response.body) as Record<string, unknown>;
+    const linkset = parsed.linkset;
+    if (!Array.isArray(linkset)) throw new Error("missing linkset");
+    const links = linksetHrefs(linkset, origin);
+    return {
+      found: true,
+      links,
+      status: response.status,
+      bytes: response.bytes,
+      detail:
+        links.length > 0
+          ? `The API catalog advertises ${plural(links.length, "OpenAPI description")}.`
+          : "An API catalog is published, but it does not advertise an OpenAPI description.",
+    };
+  } catch {
+    return {
+      found: false,
+      links: [],
+      status: response.status,
+      bytes: response.bytes,
+      detail: "The API catalog could not be parsed as an RFC 9727 linkset.",
+    };
+  }
+}
+
+async function probeOpenApi(
+  origin: string,
+  settings: FetchSettings,
+  catalogLinks: readonly string[] = [],
+): Promise<ProbeResult> {
+  const candidates = [
+    ...new Set(["/openapi.json", "/.well-known/openapi.json", "/openapi.yaml", ...catalogLinks]),
+  ];
 
   const results = await Promise.all(
-    candidates.map(async (path) => {
-      const response = await fetchText(new URL(path, origin), {
+    candidates.map(async (candidate) => {
+      let url: URL;
+      try {
+        url = new URL(candidate, origin);
+      } catch {
+        return null;
+      }
+      const response = await fetchText(url, {
         accept: "application/json,application/yaml,text/yaml,*/*;q=0.5",
         timeoutMs: settings.timeoutMs,
         userAgent: settings.userAgent,
+        headers: settings.headers,
         maxBytes: 1_000_000,
       });
 
@@ -359,11 +500,11 @@ async function probeOpenApi(origin: string, settings: FetchSettings): Promise<Pr
         !looksLikeHtml(response.body) &&
         (/"(openapi|swagger)"\s*:/.test(head) || /^\s*(openapi|swagger)\s*:/im.test(head));
 
-      return { path, response, looksStructured };
+      return { path: url.pathname, url: url.toString(), response, looksStructured };
     }),
   );
 
-  const hit = results.find((entry) => entry.looksStructured);
+  const hit = results.find((entry) => entry?.looksStructured);
   if (!hit) {
     return {
       found: false,
@@ -371,57 +512,53 @@ async function probeOpenApi(origin: string, settings: FetchSettings): Promise<Pr
       url: null,
       status: null,
       bytes: 0,
-      detail: "No OpenAPI description was found at /openapi.json or the usual .well-known paths.",
+      detail:
+        "No OpenAPI description was found at /openapi.json, the usual .well-known paths, or the API catalog.",
     };
   }
 
   return {
     found: true,
     path: hit.path,
-    url: new URL(hit.path, origin).toString(),
+    url: hit.url,
     status: hit.response.status,
     bytes: hit.response.bytes,
     detail: `An API description is published at ${hit.path}.`,
   };
 }
 
-async function probeWellKnown(
-  origin: string,
-  settings: FetchSettings,
-): Promise<ProbeResult & { entries: string[] }> {
-  const candidates = [
-    { path: "/.well-known/security.txt", validate: (body: string) => /contact\s*:/i.test(body) },
-    {
-      path: "/.well-known/ai-plugin.json",
-      validate: (body: string) => {
-        try {
-          const parsed = JSON.parse(body) as Record<string, unknown>;
-          return Boolean(parsed.schema_version || parsed.name_for_model);
-        } catch {
-          return false;
-        }
-      },
-    },
-  ];
-
-  const results = await Promise.all(
-    candidates.map(async (candidate) => {
-      const response = await fetchText(new URL(candidate.path, origin), {
-        accept: "application/json,text/plain,*/*;q=0.5",
+async function probeWellKnown(origin: string, settings: FetchSettings): Promise<WellKnownProbe> {
+  const [catalog, security] = await Promise.all([
+    probeApiCatalog(origin, settings),
+    (async () => {
+      const response = await fetchText(new URL("/.well-known/security.txt", origin), {
+        accept: "text/plain,*/*;q=0.5",
         timeoutMs: settings.timeoutMs,
         userAgent: settings.userAgent,
+        headers: settings.headers,
         maxBytes: 400_000,
       });
       return {
-        path: candidate.path,
+        path: "/.well-known/security.txt",
         response,
-        valid: response.ok && candidate.validate(response.body),
+        valid: response.ok && /contact\s*:/i.test(response.body),
       };
-    }),
-  );
+    })(),
+  ]);
 
-  const entries = results.filter((entry) => entry.valid).map((entry) => entry.path);
-  const first = results.find((entry) => entry.valid);
+  const entries = [
+    ...(catalog.found ? ["/.well-known/api-catalog"] : []),
+    ...(security.valid ? ["/.well-known/security.txt"] : []),
+  ];
+  const first = catalog.found
+    ? { path: "/.well-known/api-catalog", status: catalog.status, bytes: catalog.bytes }
+    : security.valid
+      ? {
+          path: security.path,
+          status: security.response.status,
+          bytes: security.response.bytes,
+        }
+      : null;
 
   if (!first) {
     return {
@@ -430,8 +567,11 @@ async function probeWellKnown(
       url: null,
       status: null,
       bytes: 0,
-      detail: "No .well-known discovery documents were found.",
+      detail: "No API catalog or security.txt document was found under /.well-known/.",
       entries: [],
+      apiCatalog: false,
+      security: false,
+      openApiLinks: [],
     };
   }
 
@@ -439,11 +579,296 @@ async function probeWellKnown(
     found: true,
     path: first.path,
     url: new URL(first.path, origin).toString(),
-    status: first.response.status,
-    bytes: first.response.bytes,
-    detail: `Discovery documents found: ${entries.join(", ")}.`,
+    status: first.status,
+    bytes: first.bytes,
+    detail:
+      entries.length > 0
+        ? `Discovery documents found: ${entries.join(", ")}.${catalog.detail !== "No RFC 9727 API catalog was found." ? ` ${catalog.detail}` : ""}`
+        : "No .well-known discovery documents were found.",
     entries,
+    apiCatalog: catalog.found,
+    security: security.valid,
+    openApiLinks: catalog.links,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Discovery probes
+// ---------------------------------------------------------------------------
+
+interface FeedProbe {
+  found: boolean;
+  url: string | null;
+  status: number | null;
+  items: number;
+  line: number | null;
+  detail: string;
+}
+
+interface MarkdownProbe {
+  offered: boolean;
+  url: string | null;
+  path: string;
+  line: number | null;
+  matched: boolean;
+  via: "negotiation" | "alternate" | "sibling" | null;
+  detail: string;
+}
+
+interface AgentFetchProbe {
+  status: CheckStatus;
+  comparisons: AgentFetchComparison[];
+  detail: string;
+}
+
+function feedItemCount(body: string): number {
+  const rss = body.match(/<item[\s>]/gi)?.length ?? 0;
+  const atom = body.match(/<entry[\s>]/gi)?.length ?? 0;
+  if (rss > 0 || atom > 0) return Math.max(rss, atom);
+  try {
+    const parsed = JSON.parse(body) as Record<string, unknown>;
+    return Array.isArray(parsed.items) ? parsed.items.length : 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function probeFeed(metadata: PageMetadata, settings: FetchSettings): Promise<FeedProbe> {
+  const link = metadata.feeds[0];
+  if (!link) {
+    return {
+      found: false,
+      url: null,
+      status: null,
+      items: 0,
+      line: null,
+      detail: "The homepage does not advertise an RSS, Atom or JSON feed.",
+    };
+  }
+
+  const response = await fetchText(link.href, {
+    accept:
+      "application/rss+xml,application/atom+xml,application/feed+json,application/json,*/*;q=0.5",
+    timeoutMs: settings.timeoutMs,
+    userAgent: settings.userAgent,
+    headers: settings.headers,
+    maxBytes: 1_000_000,
+  });
+
+  if (!response.ok || looksLikeHtml(response.body)) {
+    return {
+      found: true,
+      url: link.href,
+      status: response.status || null,
+      items: 0,
+      line: link.line,
+      detail: !response.ok
+        ? `The feed link returns HTTP ${response.status || "no response"}.`
+        : "The feed link returns an HTML page rather than a feed document.",
+    };
+  }
+
+  const items = feedItemCount(response.body);
+  return {
+    found: true,
+    url: link.href,
+    status: response.status,
+    items,
+    line: link.line,
+    detail:
+      items > 0
+        ? `The feed resolves to ${plural(items, "item")}.`
+        : "The feed resolves, but it does not contain any items.",
+  };
+}
+
+function normalizeHeading(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function headingMatches(markdown: string, pageHeading: string): boolean {
+  const first = /^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/m.exec(markdown)?.[1] ?? "";
+  const left = normalizeHeading(first);
+  const right = normalizeHeading(pageHeading);
+  if (!left || !right) return false;
+  if (left === right || left.includes(right) || right.includes(left)) return true;
+
+  const leftTokens = new Set(left.split(" ").filter((token) => token.length > 2));
+  const rightTokens = new Set(right.split(" ").filter((token) => token.length > 2));
+  if (leftTokens.size === 0 || rightTokens.size === 0) return false;
+  let shared = 0;
+  for (const token of leftTokens) if (rightTokens.has(token)) shared += 1;
+  return shared / Math.min(leftTokens.size, rightTokens.size) >= 0.6;
+}
+
+function looksLikeMarkdown(body: string): boolean {
+  return !looksLikeHtml(body) && /^\s{0,3}#{1,6}\s+\S/m.test(body);
+}
+
+async function probeMarkdownMirror(input: {
+  pageUrl: string;
+  metadata: PageMetadata;
+  pageHeading: string;
+  settings: FetchSettings;
+}): Promise<MarkdownProbe> {
+  const { pageUrl, metadata, pageHeading, settings } = input;
+  const pagePath = new URL(pageUrl).pathname;
+
+  const evaluate = (
+    body: string,
+    url: string,
+    line: number | null,
+    via: MarkdownProbe["via"],
+  ): MarkdownProbe => {
+    if (!body.trim()) {
+      return {
+        offered: true,
+        url,
+        path: new URL(url).pathname,
+        line,
+        matched: false,
+        via,
+        detail: "A markdown response was returned, but it was empty.",
+      };
+    }
+    const matched = headingMatches(body, pageHeading);
+    return {
+      offered: true,
+      url,
+      path: new URL(url).pathname,
+      line,
+      matched,
+      via,
+      detail: matched
+        ? `Markdown is available at ${new URL(url).pathname} and its first heading matches the page H1.`
+        : "Markdown was returned, but its first heading does not match the page H1.",
+    };
+  };
+
+  const negotiation = await fetchText(pageUrl, {
+    accept: "text/markdown,text/x-markdown,text/plain;q=0.8,text/html;q=0.5",
+    timeoutMs: settings.timeoutMs,
+    userAgent: settings.userAgent,
+    headers: settings.headers,
+    maxBytes: 1_500_000,
+  });
+  if (
+    negotiation.ok &&
+    (/text\/(?:x-)?markdown/i.test(negotiation.contentType) || looksLikeMarkdown(negotiation.body))
+  ) {
+    return evaluate(negotiation.body, negotiation.finalUrl, null, "negotiation");
+  }
+
+  const alternate = metadata.markdownAlternates[0];
+  if (alternate) {
+    const response = await fetchText(alternate.href, {
+      accept: "text/markdown,text/x-markdown,text/plain;q=0.8,*/*;q=0.5",
+      timeoutMs: settings.timeoutMs,
+      userAgent: settings.userAgent,
+      headers: settings.headers,
+      maxBytes: 1_500_000,
+    });
+    if (response.ok && looksLikeMarkdown(response.body)) {
+      return evaluate(response.body, response.finalUrl, alternate.line, "alternate");
+    }
+  }
+
+  const sibling = new URL(pageUrl);
+  sibling.pathname = pagePath.endsWith("/")
+    ? `${pagePath}index.md`
+    : `${pagePath.replace(/\/$/, "")}.md`;
+  sibling.search = "";
+  const siblingResponse = await fetchText(sibling, {
+    accept: "text/markdown,text/x-markdown,text/plain;q=0.8,*/*;q=0.5",
+    timeoutMs: settings.timeoutMs,
+    userAgent: settings.userAgent,
+    headers: settings.headers,
+    maxBytes: 1_500_000,
+  });
+  if (siblingResponse.ok && looksLikeMarkdown(siblingResponse.body)) {
+    return evaluate(siblingResponse.body, siblingResponse.finalUrl, null, "sibling");
+  }
+
+  return {
+    offered: false,
+    url: null,
+    path: pagePath,
+    line: null,
+    matched: false,
+    via: null,
+    detail:
+      "No markdown mirror was found through content negotiation, a markdown alternate link or a .md sibling.",
+  };
+}
+
+async function probeAgentFetch(input: {
+  pageUrl: string;
+  baseline: FetchTextOutcome;
+  settings: FetchSettings;
+}): Promise<AgentFetchProbe> {
+  const { pageUrl, baseline, settings } = input;
+  const fetchAs = (label: string): Promise<FetchTextOutcome> =>
+    fetchText(pageUrl, {
+      accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.6",
+      timeoutMs: settings.timeoutMs,
+      userAgent: crawlerUserAgent(label),
+      headers: settings.headers,
+      maxBytes: 2_500_000,
+    });
+
+  const gpt = await fetchAs("GPTBot");
+  const gptComparison = compareAgentFetch({
+    userAgent: "GPTBot",
+    baseline,
+    response: gpt,
+  });
+
+  let searchComparison: AgentFetchComparison | null = null;
+  if (gptComparison.blocked) {
+    const search = await fetchAs("OAI-SearchBot");
+    searchComparison = compareAgentFetch({
+      userAgent: "OAI-SearchBot",
+      baseline,
+      response: search,
+    });
+  }
+
+  const comparisons = searchComparison ? [gptComparison, searchComparison] : [gptComparison];
+  const challenge = comparisons.find((entry) => entry.challenge)?.challenge ?? null;
+  const searchBlocked = searchComparison?.blocked ?? false;
+
+  let status: CheckStatus;
+  let detail: string;
+  if (searchBlocked || challenge) {
+    status = "fail";
+    detail = `${gptComparison.detail}${searchComparison ? ` ${searchComparison.detail}` : ""}${
+      challenge
+        ? ` The ${challenge} challenge page blocks agents before they can read robots.txt.`
+        : ""
+    }`;
+  } else if (gptComparison.blocked) {
+    status = "warn";
+    detail = `${gptComparison.detail} OAI-SearchBot is allowed, so this looks like a training-only block.`;
+  } else {
+    status = "pass";
+    detail = `${gptComparison.detail} The default fetch and the GPTBot fetch are consistent.`;
+  }
+
+  return { status, comparisons, detail };
+}
+
+function lastmodFor(url: string, lastmods: Record<string, string>): string | null {
+  const direct = lastmods[url];
+  if (direct) return direct;
+  const trimmed = url.replace(/\/$/, "");
+  for (const [key, value] of Object.entries(lastmods)) {
+    if (key.replace(/\/$/, "") === trimmed) return value;
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -643,21 +1068,47 @@ function buildDiscoveryPillar(input: {
   sitemap: SitemapOutcome;
   robots: RobotsData;
   robotsBody: string;
+  profileType: SiteType;
+  feed: FeedProbe;
+  markdown: MarkdownProbe;
+  llmsResolved: readonly LlmsResolvedLink[];
+  llmsCoverage: LlmsTxtCoverage | null;
+  pageDiscovery: AuditCheck[];
 }): AuditPillar {
-  const { origin, llms, llmsFull, sitemap, robots, robotsBody } = input;
+  const {
+    origin,
+    llms,
+    llmsFull,
+    sitemap,
+    robots,
+    robotsBody,
+    profileType,
+    feed,
+    markdown,
+    llmsResolved,
+    llmsCoverage,
+    pageDiscovery,
+  } = input;
   const checks: AuditCheck[] = [];
 
   const llmsIsText = llms.ok && !looksLikeHtml(llms.body);
   const llmsValidation: LlmsTxtValidation | null = llmsIsText ? validateLlmsTxt(llms.body) : null;
   const llmsValid = llmsValidation?.valid ?? false;
+  const brokenLinks = llmsResolved.filter((link) => !link.ok);
+  const lowCoverage = llmsCoverage !== null && llmsCoverage.sampled < 25;
 
   let llmsStatus: CheckStatus = "fail";
   if (llmsValid) llmsStatus = "pass";
   else if (llmsIsText) llmsStatus = "warn";
   else if (llms.ok) llmsStatus = "warn";
+  if (llmsValid && (brokenLinks.length > 0 || lowCoverage)) llmsStatus = "warn";
 
   const llmsSummary = llmsValid
-    ? `Valid · ${plural(llmsValidation?.linkCount ?? 0, "link")}`
+    ? brokenLinks.length > 0
+      ? `Valid · ${plural(brokenLinks.length, "broken link")}`
+      : lowCoverage
+        ? `Valid · ${llmsCoverage?.sampled ?? 0}% page coverage`
+        : `Valid · ${plural(llmsValidation?.linkCount ?? 0, "link")}`
     : llmsIsText
       ? `Invalid · ${plural(llmsValidation?.issues.filter((issue) => issue.severity === "error").length ?? 0, "error")}`
       : llms.ok
@@ -668,8 +1119,22 @@ function buildDiscoveryPillar(input: {
             ? "Unreachable"
             : `HTTP ${llms.status}`;
 
+  const coverageDetail = llmsCoverage
+    ? ` Coverage: ${llmsCoverage.sampled}% of sampled pages are linked and ${llmsCoverage.sitemap}% of links appear in the sitemap.`
+    : "";
+  const resolutionDetail =
+    llmsResolved.length > 0
+      ? ` Resolved ${plural(llmsResolved.length, "link")}: ${
+          brokenLinks.length === 0
+            ? "all reachable."
+            : `${brokenLinks.length} broken or undeclared off-origin (${brokenLinks
+                .map((link) => `${new URL(link.url).pathname} → ${link.status || "no response"}`)
+                .join(", ")}).`
+        }`
+      : "";
+
   const llmsDetail = llmsValid
-    ? `H1 “${llmsValidation?.h1}” with ${plural(llmsValidation?.linkCount ?? 0, "markdown link")} across ${plural(llmsValidation?.sections.length ?? 0, "section")}.`
+    ? `H1 “${llmsValidation?.h1}” with ${plural(llmsValidation?.linkCount ?? 0, "markdown link")} across ${plural(llmsValidation?.sections.length ?? 0, "section")}.${coverageDetail}${resolutionDetail}`
     : !llms.ok
       ? llms.status === 404
         ? "No /llms.txt file was found at the site root, so agents have no curated entry point."
@@ -783,6 +1248,9 @@ Full page content in markdown, with no \`?page=\` links and no truncated section
       : sitemap.lastStatus === 404
         ? "fail"
         : "warn";
+  const lastmodCount = sitemap.urls.filter((url) => lastmodFor(url, sitemap.lastmods)).length;
+  const lastmodShare =
+    sitemap.urls.length === 0 ? 0 : Math.round((lastmodCount / sitemap.urls.length) * 100);
 
   checks.push(
     check({
@@ -801,7 +1269,7 @@ Full page content in markdown, with no \`?page=\` links and no truncated section
             hasDirective
               ? ` robots.txt references a sitemap on line ${directiveLine}.`
               : " robots.txt does not reference the sitemap with a Sitemap: directive."
-          }`
+          }${sitemapHasUrls ? ` ${lastmodCount} of ${formatNumber(sitemap.urls.length)} URLs (${lastmodShare}%) declare a lastmod.` : ""}`
         : sitemap.found
           ? "A sitemap was found but did not contain any usable URLs."
           : "No usable XML sitemap was found at /sitemap.xml or the locations referenced in robots.txt.",
@@ -833,6 +1301,83 @@ Sitemap: ${origin}/sitemap.xml
     }),
   );
 
+  const feedExpected = profileType === "blog-media";
+  const feedWeight = feedExpected ? 1 : profileType === "docs" || profileType === "saas" ? 0.5 : 0;
+  const feedStatus: CheckStatus = feed.found
+    ? feed.items > 0
+      ? "pass"
+      : "warn"
+    : feedExpected
+      ? "fail"
+      : "info";
+
+  checks.push(
+    check({
+      id: "feed",
+      label: "RSS or Atom feed",
+      status: feedStatus,
+      summary: feed.found ? plural(feed.items, "item") : "No feed",
+      detail: feed.detail,
+      protocol: "RSS 2.0 · Atom · JSON Feed",
+      evidence: feed.url
+        ? evidenceAt(new URL(feed.url).pathname, feed.line ?? null)
+        : evidenceAt("/", null),
+      recommendation:
+        feedStatus === "pass" || feedStatus === "info"
+          ? undefined
+          : 'Publish an RSS or Atom feed and link it from the homepage with <link rel="alternate" type="application/rss+xml">.',
+      fix:
+        feedStatus === "pass" || feedStatus === "info"
+          ? undefined
+          : fix(
+              "html",
+              `<link rel="alternate" type="application/rss+xml" title="Your site feed" href="${origin}/feed.xml" />`,
+            ),
+      weight: feedWeight,
+    }),
+  );
+
+  const markdownScored = profileType === "docs" || profileType === "saas";
+  const markdownStatus: CheckStatus =
+    markdown.offered && markdownScored ? (markdown.matched ? "pass" : "warn") : "info";
+  const markdownSummary = !markdown.offered
+    ? "Not offered"
+    : markdown.via === "negotiation"
+      ? "Content negotiation"
+      : markdown.via === "alternate"
+        ? "Alternate link"
+        : ".md sibling";
+
+  checks.push(
+    check({
+      id: "markdown-mirror",
+      label: "Markdown for agents",
+      status: markdownStatus,
+      summary: markdownSummary,
+      detail: markdown.detail,
+      protocol: "text/markdown content negotiation · link rel=alternate",
+      evidence: evidenceAt(markdown.path, markdown.line),
+      recommendation:
+        markdownStatus === "pass" || markdownStatus === "info"
+          ? undefined
+          : 'Serve a markdown version through Accept: text/markdown, a <link rel="alternate" type="text/markdown"> tag, or a .md sibling path.',
+      fix:
+        markdownStatus === "pass" || markdownStatus === "info"
+          ? undefined
+          : fix(
+              "http",
+              `# Content negotiation for agents
+Accept: text/markdown → return the markdown source of the page
+
+# Or advertise a sibling
+<link rel="alternate" type="text/markdown" href="/docs/start.md" />`,
+            ),
+      weight: markdownScored ? 1.5 : 0,
+    }),
+  );
+
+  checks.push(...pageDiscovery);
+
   return {
     id: "discovery",
     name: "Discovery & Manifests",
@@ -847,13 +1392,17 @@ function buildAccessPillar(input: {
   origin: string;
   robots: RobotsData;
   robotsResponse: FetchTextOutcome;
+  paths: string[];
+  agent: AgentFetchProbe | null;
+  agentFetchEnabled: boolean;
   pageAccess: {
     metaRobots: AuditCheck;
     xRobotsTag: AuditCheck;
   };
 }): AuditPillar {
-  const { origin, robots, robotsResponse, pageAccess } = input;
+  const { origin, robots, robotsResponse, paths, agent, agentFetchEnabled, pageAccess } = input;
   const checks: AuditCheck[] = [];
+  const sampledPaths = [...new Set(paths.length > 0 ? paths : ["/"])];
 
   let robotsStatus: CheckStatus = "pass";
   if (robotsResponse.status === 404) robotsStatus = "warn";
@@ -885,9 +1434,24 @@ function buildAccessPillar(input: {
           ? undefined
           : fix(
               "robots",
-              `User-agent: *
+              `# Search and citation crawlers
+User-agent: OAI-SearchBot
 Allow: /
 
+User-agent: Claude-SearchBot
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+# On-demand fetch agents
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: Claude-User
+Allow: /
+
+# Training crawlers: Allow or Disallow is a deliberate choice
 User-agent: GPTBot
 Allow: /
 
@@ -907,8 +1471,8 @@ Sitemap: ${origin}/sitemap.xml`,
   const aiPolicyStatus: CheckStatus = !robots.exists ? "warn" : explicitPolicy ? "pass" : "warn";
   const aiGroupLine =
     robots.groups.find((group) =>
-      group.agents.some((agent) =>
-        AI_CRAWLERS.some((crawler) => crawler.label.toLowerCase() === agent),
+      group.agents.some((agentName) =>
+        AI_CRAWLERS.some((crawler) => crawler.label.toLowerCase() === agentName),
       ),
     )?.line ?? null;
 
@@ -932,18 +1496,21 @@ Sitemap: ${origin}/sitemap.xml`,
       recommendation:
         aiPolicyStatus === "pass"
           ? undefined
-          : "Add named Google-Extended, ClaudeBot and GPTBot groups with the access you intend to grant.",
+          : "Add named groups for search, fetch and training crawlers so the allow/block intent is explicit. Blocking training is a valid choice.",
       fix:
         aiPolicyStatus === "pass"
           ? undefined
           : fix(
               "robots",
-              `User-agent: Google-Extended
+              `# Search and citation crawlers
+User-agent: OAI-SearchBot
 Allow: /
 
-User-agent: ClaudeBot
+# On-demand fetch agents
+User-agent: ChatGPT-User
 Allow: /
 
+# Training crawlers: choose Allow or Disallow deliberately
 User-agent: GPTBot
 Allow: /`,
             ),
@@ -951,32 +1518,271 @@ Allow: /`,
     }),
   );
 
+  const intentEntries = (intent: CrawlerIntent) =>
+    crawlersByIntent(intent).map((crawler) => ({
+      crawler,
+      access: crawlerAccessOnPaths(robots, crawler.label, sampledPaths),
+    }));
+
+  const searchEntries = intentEntries("search");
+  const fetchEntries = intentEntries("fetch");
+  const trainingEntries = intentEntries("training");
+
+  const blockedCrawlers = (entries: typeof searchEntries) =>
+    entries.filter((entry) => entry.access.status === "fail");
+
+  const searchBlocked = blockedCrawlers(searchEntries);
+  const fetchBlocked = blockedCrawlers(fetchEntries);
+
+  const intentCheck = (
+    id: string,
+    label: string,
+    weight: number,
+    entries: typeof searchEntries,
+    blocked: typeof searchEntries,
+    detailPass: string,
+  ): AuditCheck => {
+    const firstBlocked = blocked[0];
+    const evidenceLine =
+      firstBlocked?.access.line ??
+      entries.find((entry) => entry.access.line !== null)?.access.line ??
+      (robots.exists ? 1 : null);
+    return check({
+      id,
+      label,
+      status: blocked.length === 0 ? "pass" : "fail",
+      summary:
+        blocked.length === 0
+          ? `All ${entries.length} allowed`
+          : `${blocked.length} of ${entries.length} blocked`,
+      detail:
+        blocked.length === 0
+          ? detailPass
+          : `${blocked
+              .map(
+                (entry) =>
+                  `${entry.crawler.label} is blocked on ${entry.access.blockedPaths.join(", ")}`,
+              )
+              .join("; ")}. The worst sampled path decides each crawler.`,
+      protocol: "RFC 9309 §2.2.1 · sampled paths",
+      evidence: evidenceAt("/robots.txt", evidenceLine),
+      recommendation:
+        blocked.length === 0
+          ? undefined
+          : `Allow ${blocked.map((entry) => entry.crawler.label).join(", ")} on the paths you want cited. Search and fetch agents need the content itself, not only the homepage.`,
+      fix:
+        blocked.length === 0
+          ? undefined
+          : fix(
+              "robots",
+              blocked
+                .map(
+                  (entry) => `User-agent: ${entry.crawler.label}
+Allow: /`,
+                )
+                .join("\n\n"),
+            ),
+      weight,
+    });
+  };
+
+  checks.push(
+    intentCheck(
+      "access-search",
+      "Search and citation crawlers",
+      3,
+      searchEntries,
+      searchBlocked,
+      `Every search crawler is allowed on all ${sampledPaths.length} sampled paths, so answers can cite the site.`,
+    ),
+  );
+  checks.push(
+    intentCheck(
+      "access-fetch",
+      "On-demand fetch agents",
+      2,
+      fetchEntries,
+      fetchBlocked,
+      `Every on-demand fetch agent is allowed on all ${sampledPaths.length} sampled paths.`,
+    ),
+  );
+
+  const explicitTraining = trainingEntries.filter((entry) => entry.access.scope === "specific");
+  const trainingInherited = trainingEntries.filter((entry) => entry.access.scope !== "specific");
+  const trainingStatus: CheckStatus =
+    trainingEntries.length > 0 && explicitTraining.length === trainingEntries.length
+      ? "pass"
+      : "warn";
+  const trainingLine =
+    trainingInherited.find((entry) => entry.access.line !== null)?.access.line ??
+    explicitTraining[0]?.access.line ??
+    (robots.exists ? 1 : null);
+
+  checks.push(
+    check({
+      id: "access-training",
+      label: "Training crawlers",
+      status: trainingStatus,
+      summary: `${explicitTraining.length}/${trainingEntries.length} explicit`,
+      detail:
+        trainingStatus === "pass"
+          ? "Every training crawler is named explicitly. Whether the group allows or disallows training, the choice is auditable."
+          : `${trainingInherited.length} training crawler${trainingInherited.length === 1 ? "" : "s"} inherit a wildcard group. Name them explicitly so a decision to allow or block training is visible.`,
+      protocol: "RFC 9309 §2.2.1 · explicit training policy",
+      evidence: evidenceAt("/robots.txt", trainingLine),
+      recommendation:
+        trainingStatus === "pass"
+          ? undefined
+          : "Add explicit groups for the training crawlers you care about. Allow and Disallow are both valid; the point is to make the choice auditable.",
+      fix:
+        trainingStatus === "pass"
+          ? undefined
+          : fix(
+              "robots",
+              `# Training crawlers: choose one policy per vendor
+User-agent: GPTBot
+Allow: /          # or: Disallow: /
+
+User-agent: ClaudeBot
+Allow: /          # or: Disallow: /
+
+User-agent: Google-Extended
+Allow: /          # or: Disallow: /`,
+            ),
+      weight: 1,
+    }),
+  );
+
+  const agentStatus: CheckStatus = !agentFetchEnabled || !agent ? "info" : agent.status;
+  checks.push(
+    check({
+      id: "agent-fetch",
+      label: "AI user-agent firewall check",
+      status: agentStatus,
+      summary:
+        agentStatus === "info"
+          ? "Skipped"
+          : agentStatus === "pass"
+            ? "Agents allowed"
+            : agentStatus === "warn"
+              ? "Training-only block"
+              : "Firewall block",
+      detail: !agentFetchEnabled
+        ? "The live AI user-agent comparison was disabled for this run."
+        : (agent?.detail ?? "The live AI user-agent comparison did not run."),
+      protocol: "Live HTTP fetch · GPTBot and OAI-SearchBot",
+      evidence: agent
+        ? {
+            file: "HTTP response headers",
+            line: null,
+            snippet: agent.comparisons
+              .map(
+                (entry) =>
+                  `${entry.userAgent}: HTTP ${entry.status || "no response"} · ${formatBytes(entry.bytes)}${
+                    entry.challenge ? ` · ${entry.challenge} challenge` : ""
+                  }`,
+              )
+              .join("\n"),
+          }
+        : undefined,
+      recommendation:
+        agentStatus === "warn" || agentStatus === "fail"
+          ? "Allow search and on-demand fetch agents in the firewall as well as in robots.txt. A training-only block should still let OAI-SearchBot and ChatGPT-User through."
+          : undefined,
+      fix:
+        agentStatus === "warn" || agentStatus === "fail"
+          ? fix(
+              "text",
+              `# Firewall runbook
+Cloudflare: Security → Bots → enable "AI bots" only for training crawlers, and allow OAI-SearchBot, Claude-SearchBot and PerplexityBot.
+Akamai Bot Manager: add the search and fetch agents to the allowlist by user agent.
+Generic WAF: exclude OAI-SearchBot, Claude-SearchBot, PerplexityBot, ChatGPT-User and Claude-User from bot challenges.`,
+            )
+          : undefined,
+      weight: 3,
+    }),
+  );
+
+  const signal = robots.contentSignals[0] ?? null;
+  const searchCrawlersAllowed = searchEntries.every((entry) => entry.access.status === "pass");
+  const trainingCrawlersBlocked = trainingEntries.every((entry) => entry.access.status === "fail");
+  const conflicts: string[] = [];
+  if (signal?.search === "no" && searchCrawlersAllowed) {
+    conflicts.push("Content-Signal says search=no while every search crawler is allowed");
+  }
+  if (signal?.aiTrain === "yes" && trainingCrawlersBlocked) {
+    conflicts.push("Content-Signal says ai-train=yes while every training crawler is blocked");
+  }
+  const contentSignalStatus: CheckStatus = !signal
+    ? "info"
+    : conflicts.length > 0
+      ? "warn"
+      : "pass";
+
+  checks.push(
+    check({
+      id: "content-signal",
+      label: "Content-Signal directive",
+      status: contentSignalStatus,
+      summary: signal
+        ? `search=${signal.search ?? "?"} · ai-input=${signal.aiInput ?? "?"} · ai-train=${signal.aiTrain ?? "?"}`
+        : "Not declared",
+      detail: signal
+        ? `Cloudflare Content-Signal declares search=${signal.search ?? "unset"}, ai-input=${signal.aiInput ?? "unset"} and ai-train=${signal.aiTrain ?? "unset"}.${
+            conflicts.length > 0 ? ` Conflicts: ${conflicts.join("; ")}.` : ""
+          }`
+        : "robots.txt does not declare a Cloudflare Content-Signal directive. The directive is optional, but it makes AI usage preferences machine-readable.",
+      protocol: "Cloudflare Content-Signal · robots.txt",
+      evidence: evidenceAt("/robots.txt", signal?.line ?? null),
+      recommendation:
+        contentSignalStatus === "warn"
+          ? "Make the Content-Signal values agree with the crawler groups in robots.txt."
+          : undefined,
+      fix:
+        contentSignalStatus === "warn"
+          ? fix(
+              "robots",
+              `Content-Signal: search=yes, ai-input=yes, ai-train=no
+# Keep the crawler groups consistent with these values.`,
+            )
+          : undefined,
+      weight: 0.5,
+    }),
+  );
+
   for (const crawler of AI_CRAWLERS) {
-    const access = crawlerAccess(robots, crawler.label, "/");
+    const access = crawlerAccessOnPaths(robots, crawler.label, sampledPaths);
+    const recommendation =
+      access.status === "fail"
+        ? `Update the ${crawler.label} group in robots.txt so the paths you want cited are crawlable.`
+        : access.scope === "wildcard" || access.scope === "missing" || access.scope === "none"
+          ? `Add an explicit ${crawler.label} group so the allow decision is auditable rather than inherited from a wildcard.`
+          : undefined;
     checks.push(
       check({
         id: `bot-${crawler.id}`,
         label: `${crawler.label} access`,
         status: access.status,
         summary: access.summary,
-        detail: `${crawler.vendor}: ${access.detail}`,
-        protocol: "RFC 9309 §2.2.1",
+        detail: `${crawler.vendor} · ${crawler.intent} intent: ${access.detail}`,
+        protocol: "RFC 9309 §2.2.1 · sampled paths",
         evidence: evidenceAt("/robots.txt", access.line),
-        recommendation:
-          access.status === "fail"
-            ? `Update the ${crawler.label} group in robots.txt so the paths you want cited are crawlable.`
-            : access.scope === "wildcard" || access.scope === "missing"
-              ? `Add an explicit ${crawler.label} group so the allow decision is auditable rather than inherited from a wildcard.`
-              : undefined,
-        fix:
-          access.status === "fail" || access.scope === "wildcard" || access.scope === "missing"
-            ? fix(
-                "robots",
-                `User-agent: ${crawler.label}
+        recommendation,
+        fix: recommendation
+          ? fix(
+              "robots",
+              `User-agent: ${crawler.label}
 Allow: /`,
-              )
-            : undefined,
-        weight: 2,
+            )
+          : undefined,
+        weight: 0,
+        sample: {
+          total: sampledPaths.length,
+          passed: access.allowedCount,
+          warned: 0,
+          failed: access.blockedPaths.length,
+          affected: access.blockedPaths,
+        },
       }),
     );
   }
@@ -1004,13 +1810,121 @@ function buildParseabilityPillar(checks: AuditCheck[]): AuditPillar {
   };
 }
 
+function identityHosts(sameAs: readonly string[]): Set<string> {
+  const hosts = new Set<string>();
+  for (const value of sameAs) {
+    try {
+      hosts.add(new URL(value).hostname.replace(/^www\./, ""));
+    } catch {
+      // Ignore malformed sameAs values.
+    }
+  }
+  return hosts;
+}
+
+function buildEntityIdentityCheck(input: {
+  pageResults: PageAuditResult[];
+  profileType: SiteType;
+  origin: string;
+  siteName: string;
+}): AuditCheck {
+  const { pageResults, profileType, origin, siteName } = input;
+  const candidates = pageResults.filter(
+    (page) => page.outcome === "analyzed" && (page.source === "home" || page.section === "Company"),
+  );
+  const signals = candidates.flatMap((page) => page.identity.map((signal) => ({ page, signal })));
+  const preferred =
+    signals.find((entry) =>
+      profileType === "portfolio"
+        ? entry.signal.type === "Person"
+        : entry.signal.type === "Organization",
+    ) ?? signals[0];
+
+  const fixPayload = {
+    "@context": "https://schema.org",
+    "@type": profileType === "portfolio" ? "Person" : "Organization",
+    name: siteName || "Your site name",
+    url: origin,
+    description: "One sentence describing who you are and what you do.",
+    sameAs: [
+      "https://www.wikidata.org/wiki/Q000000",
+      "https://www.linkedin.com/company/your-company",
+      "https://github.com/your-org",
+      ...(profileType === "portfolio"
+        ? []
+        : ["https://www.crunchbase.com/organization/your-company"]),
+    ],
+    ...(profileType === "portfolio"
+      ? {
+          jobTitle: "Your role",
+          knowsAbout: ["Topic one", "Topic two"],
+        }
+      : {}),
+  };
+
+  if (!preferred) {
+    return check({
+      id: "entity-identity",
+      label: "Organization or Person identity",
+      status: "fail",
+      summary: "No identity node",
+      detail:
+        "No Organization or Person structured-data node was found on the homepage or a Company page such as /about or /team.",
+      protocol: "schema.org · Organization / Person · sameAs",
+      evidence: evidenceAt("/", null),
+      recommendation:
+        "Publish an Organization or Person node with name, url, description and at least two sameAs links to authoritative profiles.",
+      fix: fix("json", JSON.stringify(fixPayload, null, 2)),
+      weight: 2.5,
+    });
+  }
+
+  const { page, signal } = preferred;
+  const hosts = identityHosts(signal.sameAs);
+  const hasCore = Boolean(signal.name && signal.url && signal.description);
+  const hasSameAs = hosts.size >= 2;
+  const portfolioExtra =
+    profileType !== "portfolio" || Boolean(signal.jobTitle) || signal.knowsAbout.length > 0;
+  const status: CheckStatus = hasCore && hasSameAs && portfolioExtra ? "pass" : "warn";
+  const missing = [
+    !signal.name ? "name" : null,
+    !signal.url ? "url" : null,
+    !signal.description ? "description" : null,
+    !hasSameAs ? "two sameAs hosts" : null,
+    !portfolioExtra ? "jobTitle or knowsAbout" : null,
+  ].filter(Boolean);
+
+  return check({
+    id: "entity-identity",
+    label: "Organization or Person identity",
+    status,
+    summary: `${signal.type} · ${hosts.size} sameAs host${hosts.size === 1 ? "" : "s"}`,
+    detail:
+      status === "pass"
+        ? `A ${signal.type} node on ${new URL(page.finalUrl).pathname} names the entity and links to ${hosts.size} distinct sameAs hosts.`
+        : `A ${signal.type} node was found on ${new URL(page.finalUrl).pathname}, but it is missing ${missing.join(", ")}.`,
+    protocol: "schema.org · Organization / Person · sameAs",
+    evidence: evidenceAt(new URL(page.finalUrl).pathname, signal.line),
+    recommendation:
+      status === "pass"
+        ? undefined
+        : "Complete the identity node with name, url, description and at least two sameAs links to profiles on other sites.",
+    fix: status === "pass" ? undefined : fix("json", JSON.stringify(fixPayload, null, 2)),
+    weight: 2.5,
+  });
+}
+
 function buildStructuredPillar(input: {
+  origin: string;
   openApi: ProbeResult;
-  wellKnown: ProbeResult & { entries: string[] };
+  wellKnown: WellKnownProbe;
   classification: SiteClassification;
   pageStructured: AuditCheck[];
+  pageResults: PageAuditResult[];
+  siteName: string;
 }): AuditPillar {
-  const { openApi, wellKnown, classification, pageStructured } = input;
+  const { origin, openApi, wellKnown, classification, pageStructured, pageResults, siteName } =
+    input;
   const checks: AuditCheck[] = [...pageStructured];
   const profileLabel = classification.label;
 
@@ -1056,26 +1970,68 @@ function buildStructuredPillar(input: {
   );
 
   checks.push(
+    buildEntityIdentityCheck({
+      pageResults,
+      profileType: classification.type,
+      origin,
+      siteName,
+    }),
+  );
+
+  const wellKnownScored = classification.compatibility.openApiScored;
+  const wellKnownStatus: CheckStatus = wellKnown.apiCatalog
+    ? wellKnownScored
+      ? "pass"
+      : "info"
+    : wellKnownScored
+      ? "warn"
+      : "info";
+  const wellKnownSummary = wellKnown.apiCatalog
+    ? "API catalog"
+    : wellKnown.security
+      ? "security.txt only"
+      : "Nothing found";
+
+  checks.push(
     check({
       id: "well-known",
       label: ".well-known discovery",
-      status: wellKnown.found ? "pass" : "warn",
-      summary: wellKnown.found ? plural(wellKnown.entries.length, "document") : "Nothing found",
-      detail: wellKnown.detail,
-      protocol: "RFC 8615 · .well-known",
+      status: wellKnownStatus,
+      summary: wellKnownSummary,
+      detail: wellKnown.apiCatalog
+        ? wellKnown.detail
+        : wellKnown.security
+          ? "Only /.well-known/security.txt was found. It is useful for security reports, but it does not describe the site's API to agents."
+          : `No /.well-known/api-catalog document was found. ${wellKnownScored ? "Publish one so agents can discover the OpenAPI description." : "The API catalog is optional for this profile."}`,
+      protocol: "RFC 9727 · API catalog · RFC 9116 · security.txt",
       evidence: evidenceAt(wellKnown.path ?? "/.well-known/", wellKnown.found ? 1 : null),
-      recommendation: wellKnown.found
-        ? undefined
-        : "Add /.well-known/security.txt (and ai-plugin.json if you expose tools) so agents can discover machine-readable policies.",
-      fix: wellKnown.found
-        ? undefined
-        : fix(
-            "text",
-            `Contact: mailto:security@example.com
-Expires: 2030-01-01T00:00:00.000Z
-Preferred-Languages: en
-Canonical: https://example.com/.well-known/security.txt`,
-          ),
+      recommendation:
+        wellKnownStatus === "warn"
+          ? "Publish /.well-known/api-catalog with a linkset entry pointing at the OpenAPI description."
+          : undefined,
+      fix:
+        wellKnownStatus === "warn"
+          ? fix(
+              "json",
+              JSON.stringify(
+                {
+                  linkset: [
+                    {
+                      anchor: origin,
+                      "service-desc": [
+                        {
+                          href: `${origin}/openapi.json`,
+                          type: "application/vnd.oai.openapi+json",
+                        },
+                      ],
+                    },
+                  ],
+                },
+                null,
+                2,
+              ),
+            )
+          : undefined,
       weight: 0.5,
     }),
   );
@@ -1101,39 +2057,44 @@ interface DiscoveryBundle {
   robots: RobotsData;
   sitemap: SitemapOutcome;
   openApi: ProbeResult;
-  wellKnown: ProbeResult & { entries: string[] };
+  wellKnown: WellKnownProbe;
 }
 
 async function loadDiscovery(origin: string, settings: FetchSettings): Promise<DiscoveryBundle> {
-  const [robotsResponse, llmsResponse, llmsFullResponse, primarySitemap, openApi, wellKnown] =
+  const [robotsResponse, llmsResponse, llmsFullResponse, primarySitemap, wellKnown] =
     await Promise.all([
       fetchText(new URL("/robots.txt", origin), {
         accept: "text/plain,*/*;q=0.5",
         timeoutMs: settings.timeoutMs,
         userAgent: settings.userAgent,
+        headers: settings.headers,
         maxBytes: 300_000,
       }),
       fetchText(new URL("/llms.txt", origin), {
         accept: "text/plain,text/markdown,*/*;q=0.5",
         timeoutMs: settings.timeoutMs,
         userAgent: settings.userAgent,
+        headers: settings.headers,
         maxBytes: 400_000,
       }),
       fetchText(new URL("/llms-full.txt", origin), {
         accept: "text/plain,text/markdown,*/*;q=0.5",
         timeoutMs: settings.timeoutMs,
         userAgent: settings.userAgent,
+        headers: settings.headers,
         maxBytes: 2_000_000,
       }),
       fetchText(new URL("/sitemap.xml", origin), {
         accept: "application/xml,text/xml,application/xhtml+xml,*/*;q=0.5",
         timeoutMs: settings.timeoutMs,
         userAgent: settings.userAgent,
+        headers: settings.headers,
         maxBytes: 4_000_000,
       }),
-      probeOpenApi(origin, settings),
       probeWellKnown(origin, settings),
     ]);
+
+  const openApi = await probeOpenApi(origin, settings, wellKnown.openApiLinks);
 
   const robots =
     robotsResponse.ok && !looksLikeHtml(robotsResponse.body)
@@ -1198,6 +2159,7 @@ function fetchHtml(
     accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.6",
     timeoutMs,
     userAgent: settings.userAgent,
+    headers: settings.headers,
     maxBytes: 2_500_000,
   });
 }
@@ -1316,6 +2278,7 @@ function fetchSettings(options: AnalyzeOptions): FetchSettings {
   return {
     timeoutMs: options.timeoutMs ?? STANDARD_TIMEOUT_MS,
     userAgent: options.userAgent,
+    headers: options.headers,
   };
 }
 
@@ -1373,7 +2336,9 @@ async function buildSiteBase(requested: URL, options: AnalyzeOptions): Promise<S
   const content = buildContentModel(seedResponse.body);
   const jsonLd = extractJsonLd($);
   const links = extractLinks($, finalUrl);
+  const seedMetadata = extractMetadata($, finalUrl.toString());
   const seedVision = buildVision({ html: seedResponse.body, title, content });
+  const seedHeading = content.headings.find((heading) => heading.level === 1)?.text ?? title;
 
   const classification = classifySite(
     {
@@ -1394,6 +2359,22 @@ async function buildSiteBase(requested: URL, options: AnalyzeOptions): Promise<S
     { override: options.siteType ?? null },
   );
 
+  const feedPromise = probeFeed(seedMetadata, settings);
+  const markdownPromise = probeMarkdownMirror({
+    pageUrl: finalUrl.toString(),
+    metadata: seedMetadata,
+    pageHeading: seedHeading,
+    settings,
+  });
+  const agentPromise =
+    options.agentFetch === false
+      ? Promise.resolve(null)
+      : probeAgentFetch({
+          pageUrl: finalUrl.toString(),
+          baseline: seedResponse,
+          settings,
+        });
+
   const inventory = buildInventory({
     origin,
     seedUrl: finalUrl.toString(),
@@ -1410,6 +2391,10 @@ async function buildSiteBase(requested: URL, options: AnalyzeOptions): Promise<S
     headers: seedResponse.headers,
     finalUrl: finalUrl.toString(),
     recommendedSchema: classification.compatibility.recommendedSchema,
+    requiredSchema: classification.compatibility.requiredSchema,
+    faqExpected: classification.compatibility.faqExpected,
+    siteName: profile.siteName,
+    sitemapLastmod: lastmodFor(finalUrl.toString(), sitemap.lastmods),
     profileLabel: classification.label,
     profileType: classification.type,
     content,
@@ -1421,7 +2406,7 @@ async function buildSiteBase(requested: URL, options: AnalyzeOptions): Promise<S
   let deadlineHit = false;
   const others = sample.filter((page) => page.url !== seedPage.url);
 
-  const extra = await mapWithConcurrency(others, SAMPLE_CONCURRENCY, async (page) => {
+  const pagePromise = mapWithConcurrency(others, SAMPLE_CONCURRENCY, async (page) => {
     if (Date.now() >= deadlineAt) {
       deadlineHit = true;
       return null;
@@ -1433,6 +2418,7 @@ async function buildSiteBase(requested: URL, options: AnalyzeOptions): Promise<S
         accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.6",
         timeoutMs: settings.timeoutMs,
         userAgent: settings.userAgent,
+        headers: settings.headers,
         maxBytes: PAGE_MAX_BYTES,
       });
 
@@ -1484,6 +2470,10 @@ async function buildSiteBase(requested: URL, options: AnalyzeOptions): Promise<S
         headers: response.headers,
         finalUrl: pageFinal.toString(),
         recommendedSchema: classification.compatibility.recommendedSchema,
+        requiredSchema: classification.compatibility.requiredSchema,
+        faqExpected: classification.compatibility.faqExpected,
+        siteName: profile.siteName,
+        sitemapLastmod: lastmodFor(pageFinal.toString(), sitemap.lastmods),
         profileLabel: classification.label,
         profileType: classification.type,
         fetchMs: Date.now() - pageStarted,
@@ -1500,6 +2490,13 @@ async function buildSiteBase(requested: URL, options: AnalyzeOptions): Promise<S
       });
     }
   });
+
+  const [extra, feed, markdown, agent] = await Promise.all([
+    pagePromise,
+    feedPromise,
+    markdownPromise,
+    agentPromise,
+  ]);
 
   const seen = new Set([seedPage.finalUrl]);
   const pageResults: PageAuditResult[] = [seedPage];
@@ -1539,6 +2536,39 @@ async function buildSiteBase(requested: URL, options: AnalyzeOptions): Promise<S
     }),
   };
 
+  const llmsIsText = discovery.llmsResponse.ok && !looksLikeHtml(discovery.llmsResponse.body);
+  const llmsLinks = llmsIsText
+    ? extractLlmsTxtLinks(discovery.llmsResponse.body, new URL("/llms.txt", origin).toString())
+    : [];
+  const llmsResolved =
+    options.resolveLinks !== false && llmsLinks.length > 0
+      ? await resolveLlmsTxtLinks(llmsLinks, {
+          origin,
+          timeoutMs: settings.timeoutMs,
+          headers: settings.headers,
+        })
+      : [];
+  const llmsCoverage =
+    llmsLinks.length > 0
+      ? llmsTxtCoverage(
+          llmsLinks,
+          pageResults.filter((page) => page.outcome === "analyzed").map((page) => page.url),
+          sitemap.urls,
+        )
+      : null;
+
+  const sampledPaths = [
+    ...new Set([
+      "/",
+      ...pageResults
+        .filter((page) => page.outcome === "analyzed")
+        .map((page) => {
+          const url = new URL(page.finalUrl);
+          return `${url.pathname}${url.search}` || "/";
+        }),
+    ]),
+  ];
+
   const pageChecks = aggregatePageChecks(pageResults);
   const pillars: AuditPillar[] = [
     buildDiscoveryPillar({
@@ -1548,19 +2578,31 @@ async function buildSiteBase(requested: URL, options: AnalyzeOptions): Promise<S
       sitemap,
       robots,
       robotsBody: robotsResponse.body,
+      profileType: classification.type,
+      feed,
+      markdown,
+      llmsResolved,
+      llmsCoverage,
+      pageDiscovery: pageChecks.discovery,
     }),
     buildAccessPillar({
       origin,
       robots,
       robotsResponse,
+      paths: sampledPaths,
+      agent,
+      agentFetchEnabled: options.agentFetch !== false,
       pageAccess: pageChecks.access,
     }),
     buildParseabilityPillar(pageChecks.parseability),
     buildStructuredPillar({
+      origin,
       openApi,
       wellKnown,
       classification,
       pageStructured: pageChecks.structured,
+      pageResults,
+      siteName: profile.siteName,
     }),
   ].map((pillar) => ({ ...pillar, score: scorePillar(pillar) }));
 
@@ -1590,6 +2632,8 @@ async function buildSiteBase(requested: URL, options: AnalyzeOptions): Promise<S
     pageResults,
     seedPage,
     seedVision,
+    freshness: seedPage.freshness,
+    agentFetch: agent?.comparisons ?? [],
     crawledAt: new Date().toISOString(),
   };
 }
@@ -1689,7 +2733,7 @@ async function analyzeSiteScope(
   startedAt: number,
 ): Promise<AuditResult> {
   const cacheEnabled = options.cache !== false;
-  const siteKey = `${requested.origin}::${options.siteType ?? "auto"}`;
+  const siteKey = `${SCORING_VERSION}::${requested.origin}::${options.siteType ?? "auto"}::${options.resolveLinks === false ? "no-links" : "links"}::${options.agentFetch === false ? "no-agent" : "agent"}`;
   const siteHit = cacheEnabled ? readCache(siteCache, siteKey) : null;
   const siteCached = Boolean(siteHit);
   const base = siteHit?.value ?? (await buildSiteBase(requested, options));
@@ -1707,7 +2751,7 @@ async function analyzeSiteScope(
     focus = { page: base.seedPage, vision: base.seedVision };
     focusCached = siteCached;
   } else {
-    const focusKey = `${requested.toString()}::${options.siteType ?? "auto"}`;
+    const focusKey = `${SCORING_VERSION}::${requested.toString()}::${options.siteType ?? "auto"}`;
     const focusHit = cacheEnabled ? readCache(focusCache, focusKey) : null;
     if (focusHit) {
       focus = focusHit.value;
@@ -1737,6 +2781,8 @@ async function analyzeSiteScope(
     files: base.files,
     vision: focus.vision,
     fixes: base.fixes,
+    freshness: base.freshness,
+    agentFetch: base.agentFetch,
     meta: {
       fetchMs: Date.now() - startedAt,
       pageCount: base.pages.length,
@@ -1746,7 +2792,7 @@ async function analyzeSiteScope(
       cached: siteCached && focusCached,
       siteCached,
       focusCached,
-      scoringVersion: "site-1",
+      scoringVersion: SCORING_VERSION,
     },
   };
 }
@@ -1759,7 +2805,7 @@ async function analyzePageScope(
   const cacheEnabled = options.cache !== false;
   const settings = fetchSettings(options);
   const homeTimeoutMs = options.timeoutMs ?? 9_000;
-  const cacheKey = `${requested.toString()}::${options.siteType ?? "auto"}::page`;
+  const cacheKey = `${SCORING_VERSION}::${requested.toString()}::${options.siteType ?? "auto"}::page`;
   const hit = cacheEnabled ? readCache(pageScopeCache, cacheKey) : null;
   if (hit) {
     return {
@@ -1805,7 +2851,9 @@ async function analyzePageScope(
   const content = buildContentModel(response.body);
   const jsonLd = extractJsonLd($);
   const links = extractLinks($, finalUrl);
+  const metadata = extractMetadata($, finalUrl.toString());
   const vision = buildVision({ html: response.body, title, content });
+  const pageHeading = content.headings.find((heading) => heading.level === 1)?.text ?? title;
 
   const classification = classifySite(
     {
@@ -1826,6 +2874,23 @@ async function analyzePageScope(
     { override: options.siteType ?? null },
   );
 
+  const [feed, markdown, agent] = await Promise.all([
+    probeFeed(metadata, settings),
+    probeMarkdownMirror({
+      pageUrl: finalUrl.toString(),
+      metadata,
+      pageHeading,
+      settings,
+    }),
+    options.agentFetch === false
+      ? Promise.resolve(null)
+      : probeAgentFetch({
+          pageUrl: finalUrl.toString(),
+          baseline: response,
+          settings,
+        }),
+  ]);
+
   const inventory = buildInventory({
     origin,
     seedUrl: finalUrl.toString(),
@@ -1839,6 +2904,10 @@ async function analyzePageScope(
     headers: response.headers,
     finalUrl: finalUrl.toString(),
     recommendedSchema: classification.compatibility.recommendedSchema,
+    requiredSchema: classification.compatibility.requiredSchema,
+    faqExpected: classification.compatibility.faqExpected,
+    siteName: profile.siteName,
+    sitemapLastmod: lastmodFor(finalUrl.toString(), sitemap.lastmods),
     profileLabel: classification.label,
     profileType: classification.type,
     content,
@@ -1846,7 +2915,23 @@ async function analyzePageScope(
     fetchMs: 0,
   });
 
+  const llmsIsText = discovery.llmsResponse.ok && !looksLikeHtml(discovery.llmsResponse.body);
+  const llmsLinks = llmsIsText
+    ? extractLlmsTxtLinks(discovery.llmsResponse.body, new URL("/llms.txt", origin).toString())
+    : [];
+  const llmsResolved =
+    options.resolveLinks !== false && llmsLinks.length > 0
+      ? await resolveLlmsTxtLinks(llmsLinks, {
+          origin,
+          timeoutMs: settings.timeoutMs,
+          headers: settings.headers,
+        })
+      : [];
+  const llmsCoverage =
+    llmsLinks.length > 0 ? llmsTxtCoverage(llmsLinks, [page.url], sitemap.urls) : null;
+
   const pageChecks = directPageChecks(page);
+  const sampledPaths = [...new Set(["/", `${finalUrl.pathname}${finalUrl.search}` || "/"])];
   const pillars: AuditPillar[] = [
     buildDiscoveryPillar({
       origin,
@@ -1855,19 +2940,31 @@ async function analyzePageScope(
       sitemap,
       robots,
       robotsBody: robotsResponse.body,
+      profileType: classification.type,
+      feed,
+      markdown,
+      llmsResolved,
+      llmsCoverage,
+      pageDiscovery: pageChecks.discovery,
     }),
     buildAccessPillar({
       origin,
       robots,
       robotsResponse,
+      paths: sampledPaths,
+      agent,
+      agentFetchEnabled: options.agentFetch !== false,
       pageAccess: pageChecks.access,
     }),
     buildParseabilityPillar(pageChecks.parseability),
     buildStructuredPillar({
+      origin,
       openApi,
       wellKnown,
       classification,
       pageStructured: pageChecks.structured,
+      pageResults: [page],
+      siteName: profile.siteName,
     }),
   ].map((pillar) => ({ ...pillar, score: scorePillar(pillar) }));
 
@@ -1922,6 +3019,8 @@ async function analyzePageScope(
     files,
     vision,
     fixes: buildFixes(pillars),
+    freshness: page.freshness,
+    agentFetch: agent?.comparisons ?? [],
     meta: {
       fetchMs: Date.now() - startedAt,
       pageCount: inventory.pages.length,
@@ -1931,7 +3030,7 @@ async function analyzePageScope(
       cached: false,
       siteCached: false,
       focusCached: false,
-      scoringVersion: "site-1",
+      scoringVersion: SCORING_VERSION,
     },
   };
 

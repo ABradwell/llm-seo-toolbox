@@ -69,8 +69,15 @@ export function auditFixture(): AuditResult {
     h1Count: 0,
     headingCount: 1,
     jsonLdTypes: [],
+    structuredFormats: [],
     metaRobots: "",
     xRobotsTag: null,
+    freshness: null,
+    faqPairs: 0,
+    hasFaqSchema: false,
+    identity: [],
+    descriptionChars: 0,
+    canonical: null,
     fetchMs: 10,
   };
   return {
@@ -112,7 +119,9 @@ export function auditFixture(): AuditResult {
       ],
       compatibility: {
         openApiScored: true,
-        recommendedSchema: ["SoftwareApplication", "WebApplication", "FAQPage"],
+        requiredSchema: ["SoftwareApplication", "WebApplication"],
+        recommendedSchema: ["SoftwareApplication", "WebApplication", "FAQPage", "Organization"],
+        faqExpected: true,
         note: "OpenAPI is scored.",
       },
     },
@@ -166,6 +175,8 @@ export function auditFixture(): AuditResult {
       rawTruncated: false,
       markdownTruncated: false,
     },
+    freshness: null,
+    agentFetch: [],
     fixes: [
       {
         checkId: "h1",
@@ -188,7 +199,7 @@ export function auditFixture(): AuditResult {
       cached: false,
       siteCached: false,
       focusCached: false,
-      scoringVersion: "site-1",
+      scoringVersion: "site-2",
     },
   };
 }

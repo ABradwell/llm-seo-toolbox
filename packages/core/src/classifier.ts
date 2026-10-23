@@ -485,7 +485,9 @@ export function classifySite(
         : signals.filter((signal) => signal.source === "fallback").slice(0, 1),
     compatibility: {
       openApiScored: definition.openApiRelevant,
+      requiredSchema: [...definition.requiredSchema],
       recommendedSchema: [...definition.recommendedSchema],
+      faqExpected: definition.faqExpected,
       note: definition.auditNote,
     },
   };

@@ -3,7 +3,12 @@ import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { validateLlmsTxt } from "./llms-txt";
+import {
+  validateLlmsTxt,
+  extractLlmsTxtLinks,
+  llmsTxtCoverage,
+  resolveLlmsTxtLinks,
+} from "./llms-txt";
 
 const VALID = `# Example Docs
 
@@ -92,5 +97,180 @@ describe("validateLlmsTxt", () => {
     expect(result.paginated).toBe(false);
     expect(result.linkCount).toBe(0);
     expect(result.lines).toBeGreaterThan(40);
+  });
+});
+
+describe("extractLlmsTxtLinks", () => {
+  it("resolves relative links and records their section and line", () => {
+    const links = extractLlmsTxtLinks(
+      "# Example\n\n## Docs\n- [Start](/docs/start)\n- [API](https://example.com/docs/api)\n",
+      "https://example.com/",
+    );
+
+    expect(links).toEqual([
+      { url: "https://example.com/docs/start", label: "Start", section: "Docs", line: 4 },
+      { url: "https://example.com/docs/api", label: "API", section: "Docs", line: 5 },
+    ]);
+  });
+
+  it("skips anchors and non-HTTP schemes", () => {
+    const links = extractLlmsTxtLinks(
+      [
+        "# Example",
+        "- [Mail](mailto:hi@example.com)",
+        "- [Phone](tel:+10000000000)",
+        "- [Anchor](#docs)",
+        "- [Script](javascript:alert(1))",
+        "- [Real](https://example.com/real)",
+      ].join("\n"),
+      "https://example.com/",
+    );
+
+    expect(links.map((link) => link.url)).toEqual(["https://example.com/real"]);
+    expect(links[0].section).toBeNull();
+  });
+});
+
+describe("llmsTxtCoverage", () => {
+  const links = extractLlmsTxtLinks(
+    [
+      "# Example",
+      "- [Home](https://example.com/)",
+      "- [Start](https://example.com/docs/start/)",
+      "- [Off-site](https://other.example/page)",
+    ].join("\n"),
+    "https://example.com/",
+  );
+
+  it("measures sampled-page and sitemap coverage", () => {
+    const coverage = llmsTxtCoverage(
+      links,
+      ["https://example.com", "https://example.com/docs/start"],
+      ["https://example.com/", "https://example.com/docs/start", "https://example.com/docs/api"],
+    );
+
+    expect(coverage.sampled).toBe(100);
+    expect(coverage.sitemap).toBe(67);
+  });
+
+  it("normalises trailing slashes and fragments", () => {
+    const coverage = llmsTxtCoverage(
+      extractLlmsTxtLinks("- [Start](https://example.com/docs/start/#top)", "https://example.com/"),
+      ["https://example.com/docs/start"],
+      ["https://example.com/docs/start/"],
+    );
+
+    expect(coverage).toEqual({ sampled: 100, sitemap: 100 });
+  });
+
+  it("returns zero for empty inputs", () => {
+    expect(llmsTxtCoverage([], [], [])).toEqual({ sampled: 0, sitemap: 0 });
+    expect(llmsTxtCoverage(links, [], ["https://example.com/"])).toEqual({
+      sampled: 0,
+      sitemap: 33,
+    });
+  });
+});
+
+describe("resolveLlmsTxtLinks", () => {
+  const links = extractLlmsTxtLinks(
+    [
+      "# Example",
+      "## Docs",
+      "- [Start](https://example.com/docs/start)",
+      "- [API](https://example.com/docs/api)",
+      "- [Third](https://example.com/docs/third)",
+      "## Blog",
+      "- [Post](https://example.com/blog/post)",
+      "- [News](https://example.com/blog/news)",
+      "## More",
+      "- [About](https://example.com/about)",
+    ].join("\n"),
+    "https://example.com/",
+  );
+
+  it("HEAD-checks at most two links per section", async () => {
+    const checked: string[] = [];
+    const head = async (url: string | URL) => {
+      checked.push(String(url));
+      return { ok: true, status: 200, finalUrl: String(url), error: null };
+    };
+
+    const results = await resolveLlmsTxtLinks(links, {
+      origin: "https://example.com",
+      head,
+    });
+
+    expect(results).toHaveLength(5);
+    expect(checked).toEqual([
+      "https://example.com/docs/start",
+      "https://example.com/docs/api",
+      "https://example.com/blog/post",
+      "https://example.com/blog/news",
+      "https://example.com/about",
+    ]);
+  });
+
+  it("marks broken links as not ok", async () => {
+    const head = async (url: string | URL) => ({
+      ok: false,
+      status: 404,
+      finalUrl: String(url),
+      error: "Not found",
+    });
+
+    const results = await resolveLlmsTxtLinks([links[0]], {
+      origin: "https://example.com",
+      head,
+    });
+
+    expect(results[0]).toMatchObject({
+      url: "https://example.com/docs/start",
+      status: 404,
+      ok: false,
+      offOrigin: false,
+      error: "Not found",
+    });
+  });
+
+  it("flags an undeclared off-origin redirect", async () => {
+    const head = async () => ({
+      ok: true,
+      status: 200,
+      finalUrl: "https://other.example/docs/start",
+      error: null,
+    });
+
+    const results = await resolveLlmsTxtLinks([links[0]], {
+      origin: "https://example.com",
+      head,
+    });
+
+    expect(results[0].offOrigin).toBe(true);
+    expect(results[0].ok).toBe(false);
+  });
+
+  it("accepts an off-origin link declared as external", async () => {
+    const external = extractLlmsTxtLinks(
+      "## External resources\n- [Partner](https://partner.example/docs)",
+      "https://example.com/",
+    );
+    const head = async () => ({
+      ok: true,
+      status: 200,
+      finalUrl: "https://partner.example/docs",
+      error: null,
+    });
+
+    const results = await resolveLlmsTxtLinks(external, {
+      origin: "https://example.com",
+      head,
+    });
+
+    expect(results[0]).toMatchObject({
+      offOrigin: false,
+      declaredExternal: true,
+      ok: true,
+    });
   });
 });

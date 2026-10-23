@@ -2,9 +2,9 @@
   "openapi": "3.1.0",
   "info": {
     "title": "LLMReady Audit API",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "summary": "Audit a site for LLM and AI crawler readiness.",
-    "description": "Fetches a site's initial HTML plus its discovery files, classifies the site, and returns a weighted four-pillar audit. Site scope (the default) samples up to eight pages and scores the origin; page scope scores the entered page. Results are cached for five minutes per server instance. The public instance allows 30 weighted credits per minute per IP: a site audit costs 3 and a page audit costs 1.",
+    "description": "Fetches a site's initial HTML plus its discovery files, classifies the site, and returns a weighted four-pillar audit. Site scope (the default) samples up to eight pages and scores the origin; page scope scores the entered page. Access checks cover 16 AI crawlers grouped by search, fetch and training intent, and a small number of agent fetches verify that AI user agents receive the same content. Results are cached for five minutes per server instance. The public instance allows 30 weighted credits per minute per IP: a site audit costs 3 and a page audit costs 1.",
     "license": {
       "name": "GPL-3.0-only",
       "identifier": "GPL-3.0-only"
@@ -199,7 +199,9 @@
           "focusUrl",
           "pageResults",
           "focusPage",
-          "coverage"
+          "coverage",
+          "freshness",
+          "agentFetch"
         ],
         "properties": {
           "scope": {
@@ -325,7 +327,7 @@
               "scoringVersion": {
                 "type": "string",
                 "enum": [
-                  "site-1"
+                  "site-2"
                 ]
               }
             }
@@ -347,6 +349,24 @@
           },
           "coverage": {
             "$ref": "#/components/schemas/AuditCoverage"
+          },
+          "freshness": {
+            "description": "Freshest machine-readable date found on the homepage. Null when no date is exposed.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FreshnessSignal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "agentFetch": {
+            "type": "array",
+            "description": "AI user-agent fetches compared with the default fetch. Empty when agent fetch probing is disabled or fails.",
+            "items": {
+              "$ref": "#/components/schemas/AgentFetchComparison"
+            }
           }
         }
       },
@@ -627,18 +647,31 @@
             "type": "object",
             "required": [
               "openApiScored",
+              "requiredSchema",
               "recommendedSchema",
+              "faqExpected",
               "note"
             ],
             "properties": {
               "openApiScored": {
                 "type": "boolean"
               },
+              "requiredSchema": {
+                "type": "array",
+                "description": "At least one of these schema types must be present for schema-types to pass.",
+                "items": {
+                  "type": "string"
+                }
+              },
               "recommendedSchema": {
                 "type": "array",
                 "items": {
                   "type": "string"
                 }
+              },
+              "faqExpected": {
+                "type": "boolean",
+                "description": "Whether FAQ content is weighted for this profile."
               },
               "note": {
                 "type": "string"
@@ -912,8 +945,15 @@
           "h1Count",
           "headingCount",
           "jsonLdTypes",
+          "structuredFormats",
           "metaRobots",
           "xRobotsTag",
+          "freshness",
+          "faqPairs",
+          "hasFaqSchema",
+          "identity",
+          "descriptionChars",
+          "canonical",
           "fetchMs"
         ],
         "properties": {
@@ -1012,6 +1052,13 @@
               "type": "string"
             }
           },
+          "structuredFormats": {
+            "type": "array",
+            "description": "Structured-data encodings found on the page.",
+            "items": {
+              "$ref": "#/components/schemas/StructuredDataFormat"
+            }
+          },
           "metaRobots": {
             "type": "string"
           },
@@ -1021,6 +1068,46 @@
               "null"
             ]
           },
+          "freshness": {
+            "description": "Freshest machine-readable date on the page. Null when no date is exposed.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FreshnessSignal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "faqPairs": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Visible question-and-answer pairs found in the content."
+          },
+          "hasFaqSchema": {
+            "type": "boolean",
+            "description": "Whether the page carries a FAQPage node with a mainEntity list."
+          },
+          "identity": {
+            "type": "array",
+            "description": "Person and Organization nodes found in the page's structured data.",
+            "items": {
+              "$ref": "#/components/schemas/IdentitySignal"
+            }
+          },
+          "descriptionChars": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Visible meta description length, in characters."
+          },
+          "canonical": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri",
+            "description": "Absolute canonical URL declared by the page, when one exists."
+          },
           "error": {
             "type": "string"
           },
@@ -1029,6 +1116,167 @@
             "minimum": 0
           }
         }
+      },
+      "FreshnessSignal": {
+        "type": "object",
+        "required": [
+          "source",
+          "property",
+          "iso",
+          "line"
+        ],
+        "description": "A machine-readable date found on a page or in its sitemap entry.",
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "json-ld",
+              "meta",
+              "time",
+              "sitemap",
+              "header"
+            ]
+          },
+          "property": {
+            "type": "string",
+            "example": "dateModified"
+          },
+          "iso": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "line": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1
+          }
+        }
+      },
+      "AgentFetchComparison": {
+        "type": "object",
+        "required": [
+          "userAgent",
+          "status",
+          "blocked",
+          "challenge",
+          "bytes",
+          "finalUrl",
+          "detail"
+        ],
+        "description": "One AI user-agent fetch compared with the default fetch.",
+        "properties": {
+          "userAgent": {
+            "type": "string",
+            "example": "GPTBot"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "blocked": {
+            "type": "boolean",
+            "description": "True when the AI user agent received a different status or a body under 20% of the default size."
+          },
+          "challenge": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "cloudflare",
+              "akamai",
+              "generic",
+              null
+            ]
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "finalUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "detail": {
+            "type": "string"
+          }
+        }
+      },
+      "IdentitySignal": {
+        "type": "object",
+        "required": [
+          "type",
+          "format",
+          "name",
+          "url",
+          "description",
+          "sameAs",
+          "jobTitle",
+          "knowsAbout",
+          "line"
+        ],
+        "description": "Summary of a Person or Organization node found in a page's structured data.",
+        "properties": {
+          "type": {
+            "type": "string",
+            "example": "Organization"
+          },
+          "format": {
+            "$ref": "#/components/schemas/StructuredDataFormat"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sameAs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "jobTitle": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "knowsAbout": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "line": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1
+          }
+        }
+      },
+      "StructuredDataFormat": {
+        "type": "string",
+        "enum": [
+          "json-ld",
+          "microdata",
+          "rdfa"
+        ]
       },
       "AuditCoverage": {
         "type": "object",

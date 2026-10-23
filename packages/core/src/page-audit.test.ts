@@ -69,16 +69,28 @@ describe("analyzePage", () => {
       "heading-order",
       "snr",
       "ssr-content",
+      "faq-content",
+      "answer-first",
+      "section-chunks",
+      "page-metadata",
+      "image-alt",
+      "citable-evidence",
       "json-ld",
       "schema-types",
+      "schema-depth",
+      "breadcrumbs",
+      "freshness",
+      "canonical",
     ]);
     expect(result.checks.every((entry) => entry.scope === "page")).toBe(true);
     expect(check(result, "h1").status).toBe("pass");
     expect(check(result, "h1").evidence?.file).toBe("/app");
     expect(check(result, "json-ld").status).toBe("pass");
     expect(check(result, "schema-types").status).toBe("pass");
-    expect(result.score).toBeGreaterThanOrEqual(90);
-    expect(result.grade).toBe("A");
+    expect(check(result, "canonical").status).toBe("warn");
+    expect(check(result, "freshness").status).toBe("info");
+    expect(result.score).toBeGreaterThanOrEqual(70);
+    expect(result.grade).toBe("B");
   });
 
   it("marks blocking robots directives as failures", () => {

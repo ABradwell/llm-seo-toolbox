@@ -7,6 +7,7 @@ import {
   CliUsageError,
   parseFormat,
   parseGrade,
+  parseHeader,
   parseScore,
   parseSiteType,
   parseTimeout,
@@ -28,6 +29,9 @@ export interface ToolboxConfig {
   output?: string;
   timeout?: number;
   userAgent?: string;
+  headers?: Record<string, string>;
+  resolveLinks?: boolean;
+  agentFetch?: boolean;
   verbose?: boolean;
   color?: boolean;
 }
@@ -71,6 +75,27 @@ function readBoolean(
   return value;
 }
 
+function readHeaders(
+  record: Record<string, unknown>,
+  key: string,
+): Record<string, string> | undefined {
+  const value = recordValue(record, key);
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new CliUsageError(`“${key}” must be an object of header names to values.`);
+  }
+
+  const headers: Record<string, string> = {};
+  for (const [name, headerValue] of Object.entries(value)) {
+    if (typeof headerValue !== "string" || !headerValue.trim()) {
+      throw new CliUsageError(`“${key}.${name}” must be a non-empty string.`);
+    }
+    const [parsedName, parsedValue] = parseHeader(`${name}: ${headerValue}`);
+    headers[parsedName] = parsedValue;
+  }
+  return headers;
+}
+
 function normalizeConfig(
   raw: unknown,
   source: string,
@@ -92,6 +117,11 @@ function normalizeConfig(
     "timeout",
     "userAgent",
     "user-agent",
+    "headers",
+    "resolveLinks",
+    "resolve-links",
+    "agentFetch",
+    "agent-fetch",
     "verbose",
     "color",
   ]);
@@ -117,6 +147,9 @@ function normalizeConfig(
 
   config.output = readString(record, "output");
   config.userAgent = readString(record, "userAgent", "user-agent");
+  config.headers = readHeaders(record, "headers");
+  config.resolveLinks = readBoolean(record, "resolveLinks", "resolve-links");
+  config.agentFetch = readBoolean(record, "agentFetch", "agent-fetch");
   config.verbose = readBoolean(record, "verbose");
   config.color = readBoolean(record, "color");
 
@@ -178,6 +211,12 @@ export function mergeOptions(
     output: pick(cli.output, config.output),
     timeout: pick(cli.timeout, config.timeout),
     userAgent: pick(cli.userAgent, config.userAgent),
+    headers:
+      cli.headers === undefined && config.headers === undefined
+        ? undefined
+        : { ...config.headers, ...cli.headers },
+    resolveLinks: pick(cli.resolveLinks, config.resolveLinks),
+    agentFetch: pick(cli.agentFetch, config.agentFetch),
     verbose: pick(cli.verbose, config.verbose),
     color: pick(cli.color, config.color),
   };

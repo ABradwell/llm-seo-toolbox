@@ -14,6 +14,10 @@ export interface ActionInputs {
   timeoutMs: number;
   /** `plain` posts plain-language change requests instead of the technical report. */
   reportStyle: ReportStyle;
+  resolveLinks: boolean;
+  agentFetch: boolean;
+  /** Extra request headers, used for protected previews and staging hosts. */
+  headers: Record<string, string>;
 }
 
 export class ActionInputError extends Error {
@@ -43,6 +47,34 @@ function parseBoolean(value: string, name: string): boolean {
   if (["true", "1", "yes", "on"].includes(normalized)) return true;
   if (["false", "0", "no", "off"].includes(normalized)) return false;
   throw new ActionInputError(`${name} must be true or false.`);
+}
+
+const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+
+function parseHeaders(value: string | undefined): Record<string, string> {
+  if (!value) return {};
+
+  const headers: Record<string, string> = {};
+  for (const line of value.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+
+    const separator = trimmed.indexOf(":");
+    if (separator === -1) {
+      throw new ActionInputError("headers must use one “Name: value” entry per line.");
+    }
+
+    const name = trimmed.slice(0, separator).trim();
+    const headerValue = trimmed.slice(separator + 1).trim();
+    if (!HEADER_NAME.test(name)) {
+      throw new ActionInputError(`headers contains an invalid name: “${name}”.`);
+    }
+    // An empty value lets a workflow pass an optional secret without
+    // constructing conditional input strings.
+    if (!headerValue) continue;
+    headers[name] = headerValue;
+  }
+  return headers;
 }
 
 export function readInputs(env: Record<string, string | undefined> = process.env): ActionInputs {
@@ -75,6 +107,10 @@ export function readInputs(env: Record<string, string | undefined> = process.env
     throw new ActionInputError("report-style must be technical or plain.");
   }
 
+  const resolveLinks = parseBoolean(readInput(env, "resolve-links") ?? "true", "resolve-links");
+  const agentFetch = parseBoolean(readInput(env, "agent-fetch") ?? "true", "agent-fetch");
+  const headers = parseHeaders(readInput(env, "headers"));
+
   return {
     url,
     minScore,
@@ -84,5 +120,8 @@ export function readInputs(env: Record<string, string | undefined> = process.env
     githubToken,
     timeoutMs,
     reportStyle: reportStyle as ReportStyle,
+    resolveLinks,
+    agentFetch,
+    headers,
   };
 }

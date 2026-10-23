@@ -29,7 +29,7 @@ export function LiveTerminal() {
           <span className="size-1.5 rounded-full bg-accent-light" aria-hidden="true" />
           reference run
         </div>
-        <span className="truncate font-mono text-[10px] text-code-muted/70">v3 · site + focus</span>
+        <span className="truncate font-mono text-[10px] text-code-muted/70">v5 · site + focus</span>
       </div>
 
       <div className="relative min-h-[268px] scanlines p-4 font-mono text-[11.5px] leading-6 sm:text-[12px]">
@@ -64,7 +64,7 @@ export function LiveTerminal() {
 
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-code-foreground/10 bg-code-foreground/[0.03] px-3 py-2 font-mono text-[10px] text-code-muted">
         <span>llms.txt · RFC 9309 · schema.org</span>
-        <span className="text-pass-light">20 checks · 8-page sample</span>
+        <span className="text-pass-light">49 checks · 8-page sample</span>
       </div>
     </div>
   );
