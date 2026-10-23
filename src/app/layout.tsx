@@ -17,10 +17,14 @@ const mono = JetBrains_Mono({
   display: "swap",
 });
 
+const shareTitle = "LLMReady · Spec compliance for AI discovery";
+const shareDescription =
+  "Classify a site, then validate the manifests, access rules and parseability signals AI crawlers depend on. Open source, no signup.";
+
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: {
-    default: "LLMReady — Spec compliance for AI discovery",
+    default: shareTitle,
     template: "%s · LLMReady",
   },
   description:
@@ -44,15 +48,13 @@ export const metadata: Metadata = {
     type: "website",
     url: siteUrl,
     siteName: "LLMReady",
-    title: "LLMReady — Spec compliance for AI discovery",
-    description:
-      "Classify a site, then validate the manifests, access rules and parseability signals AI crawlers depend on. Open source, no signup.",
+    title: shareTitle,
+    description: shareDescription,
   },
   twitter: {
     card: "summary_large_image",
-    title: "LLMReady — Spec compliance for AI discovery",
-    description:
-      "Classify a site, then audit /llms.txt, robots.txt access for AI agents, static HTML SNR and profile-specific schema.org metadata.",
+    title: shareTitle,
+    description: shareDescription,
   },
   robots: {
     index: true,
