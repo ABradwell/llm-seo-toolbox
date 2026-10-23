@@ -28,7 +28,7 @@ export const metadata: Metadata = {
     template: "%s · LLMReady",
   },
   description:
-    "Classify any site, then audit /llms.txt, RFC 9309 robots.txt, static HTML signal-to-noise and profile-specific schema.org metadata. An open-source AI compatibility auditor for Gemini, Claude and AI search crawlers.",
+    "Audit any site's llms.txt, RFC 9309 access, static HTML and schema.org signals for AI crawlers. Open source, no signup.",
   keywords: [
     "llms.txt",
     "llms-full.txt",
@@ -44,6 +44,7 @@ export const metadata: Metadata = {
   ],
   authors: [{ name: "LLMReady contributors" }],
   creator: "LLMReady",
+  alternates: { canonical: "/" },
   openGraph: {
     type: "website",
     url: siteUrl,

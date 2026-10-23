@@ -89,6 +89,8 @@ export interface AnalyzeOptions {
   resolveLinks?: boolean;
   /** Set to false to skip the live AI user-agent fetch comparison. */
   agentFetch?: boolean;
+  /** Extra request headers, used for protected previews and staging hosts. */
+  headers?: Record<string, string>;
 }
 
 const SCORING_VERSION = "site-2" as const;
@@ -96,6 +98,7 @@ const SCORING_VERSION = "site-2" as const;
 interface FetchSettings {
   timeoutMs: number;
   userAgent?: string;
+  headers?: Record<string, string>;
 }
 
 export class AuditError extends Error {
@@ -251,6 +254,7 @@ async function expandSitemap(
     accept: "application/xml,text/xml,application/xhtml+xml,*/*;q=0.5",
     timeoutMs: settings.timeoutMs,
     userAgent: settings.userAgent,
+    headers: settings.headers,
     maxBytes: 4_000_000,
   });
 
@@ -407,7 +411,7 @@ function linksetHrefs(value: unknown, origin: string): string[] {
         // Ignore malformed catalog links.
       }
     }
-    for (const key of ["service-desc", "service-doc", "describedby", "item"]) {
+    for (const key of ["linkset", "service-desc", "service-doc", "describedby", "item"]) {
       const nested = record[key];
       if (Array.isArray(nested)) nested.forEach(visit);
       else if (nested !== undefined) visit(nested);
@@ -425,6 +429,7 @@ async function probeApiCatalog(origin: string, settings: FetchSettings): Promise
     accept: "application/linkset+json,application/json,*/*;q=0.5",
     timeoutMs: settings.timeoutMs,
     userAgent: settings.userAgent,
+    headers: settings.headers,
     maxBytes: 400_000,
   });
 
@@ -485,6 +490,7 @@ async function probeOpenApi(
         accept: "application/json,application/yaml,text/yaml,*/*;q=0.5",
         timeoutMs: settings.timeoutMs,
         userAgent: settings.userAgent,
+        headers: settings.headers,
         maxBytes: 1_000_000,
       });
 
@@ -529,6 +535,7 @@ async function probeWellKnown(origin: string, settings: FetchSettings): Promise<
         accept: "text/plain,*/*;q=0.5",
         timeoutMs: settings.timeoutMs,
         userAgent: settings.userAgent,
+        headers: settings.headers,
         maxBytes: 400_000,
       });
       return {
@@ -644,6 +651,7 @@ async function probeFeed(metadata: PageMetadata, settings: FetchSettings): Promi
       "application/rss+xml,application/atom+xml,application/feed+json,application/json,*/*;q=0.5",
     timeoutMs: settings.timeoutMs,
     userAgent: settings.userAgent,
+    headers: settings.headers,
     maxBytes: 1_000_000,
   });
 
@@ -745,6 +753,7 @@ async function probeMarkdownMirror(input: {
     accept: "text/markdown,text/x-markdown,text/plain;q=0.8,text/html;q=0.5",
     timeoutMs: settings.timeoutMs,
     userAgent: settings.userAgent,
+    headers: settings.headers,
     maxBytes: 1_500_000,
   });
   if (
@@ -760,6 +769,7 @@ async function probeMarkdownMirror(input: {
       accept: "text/markdown,text/x-markdown,text/plain;q=0.8,*/*;q=0.5",
       timeoutMs: settings.timeoutMs,
       userAgent: settings.userAgent,
+      headers: settings.headers,
       maxBytes: 1_500_000,
     });
     if (response.ok && looksLikeMarkdown(response.body)) {
@@ -776,6 +786,7 @@ async function probeMarkdownMirror(input: {
     accept: "text/markdown,text/x-markdown,text/plain;q=0.8,*/*;q=0.5",
     timeoutMs: settings.timeoutMs,
     userAgent: settings.userAgent,
+    headers: settings.headers,
     maxBytes: 1_500_000,
   });
   if (siblingResponse.ok && looksLikeMarkdown(siblingResponse.body)) {
@@ -805,6 +816,7 @@ async function probeAgentFetch(input: {
       accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.6",
       timeoutMs: settings.timeoutMs,
       userAgent: crawlerUserAgent(label),
+      headers: settings.headers,
       maxBytes: 2_500_000,
     });
 
@@ -2055,24 +2067,28 @@ async function loadDiscovery(origin: string, settings: FetchSettings): Promise<D
         accept: "text/plain,*/*;q=0.5",
         timeoutMs: settings.timeoutMs,
         userAgent: settings.userAgent,
+        headers: settings.headers,
         maxBytes: 300_000,
       }),
       fetchText(new URL("/llms.txt", origin), {
         accept: "text/plain,text/markdown,*/*;q=0.5",
         timeoutMs: settings.timeoutMs,
         userAgent: settings.userAgent,
+        headers: settings.headers,
         maxBytes: 400_000,
       }),
       fetchText(new URL("/llms-full.txt", origin), {
         accept: "text/plain,text/markdown,*/*;q=0.5",
         timeoutMs: settings.timeoutMs,
         userAgent: settings.userAgent,
+        headers: settings.headers,
         maxBytes: 2_000_000,
       }),
       fetchText(new URL("/sitemap.xml", origin), {
         accept: "application/xml,text/xml,application/xhtml+xml,*/*;q=0.5",
         timeoutMs: settings.timeoutMs,
         userAgent: settings.userAgent,
+        headers: settings.headers,
         maxBytes: 4_000_000,
       }),
       probeWellKnown(origin, settings),
@@ -2143,6 +2159,7 @@ function fetchHtml(
     accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.6",
     timeoutMs,
     userAgent: settings.userAgent,
+    headers: settings.headers,
     maxBytes: 2_500_000,
   });
 }
@@ -2261,6 +2278,7 @@ function fetchSettings(options: AnalyzeOptions): FetchSettings {
   return {
     timeoutMs: options.timeoutMs ?? STANDARD_TIMEOUT_MS,
     userAgent: options.userAgent,
+    headers: options.headers,
   };
 }
 
@@ -2400,6 +2418,7 @@ async function buildSiteBase(requested: URL, options: AnalyzeOptions): Promise<S
         accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.6",
         timeoutMs: settings.timeoutMs,
         userAgent: settings.userAgent,
+        headers: settings.headers,
         maxBytes: PAGE_MAX_BYTES,
       });
 
@@ -2526,6 +2545,7 @@ async function buildSiteBase(requested: URL, options: AnalyzeOptions): Promise<S
       ? await resolveLlmsTxtLinks(llmsLinks, {
           origin,
           timeoutMs: settings.timeoutMs,
+          headers: settings.headers,
         })
       : [];
   const llmsCoverage =
@@ -2904,6 +2924,7 @@ async function analyzePageScope(
       ? await resolveLlmsTxtLinks(llmsLinks, {
           origin,
           timeoutMs: settings.timeoutMs,
+          headers: settings.headers,
         })
       : [];
   const llmsCoverage =

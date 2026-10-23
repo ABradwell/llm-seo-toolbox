@@ -146,20 +146,21 @@ pnpm cli example.com
 node packages/cli/dist/index.js example.com --format json
 ```
 
-| Flag                   | Short | Default         | Description                                                                                       |
-| :--------------------- | :---- | :-------------- | :------------------------------------------------------------------------------------------------ |
-| `--format <type>`      | `-f`  | `table`         | `table`, `json`, `markdown`, `summary` or `brief` (plain-language change requests)                |
-| `--min-score <number>` | `-s`  | `0`             | Composite score required to pass (0–100)                                                          |
-| `--min-grade <grade>`  | `-g`  | `F`             | Letter grade required to pass (`A`, `B`, `C`, `D`, `F`)                                           |
-| `--site-type <type>`   | `-t`  | `auto`          | Force a profile: `auto`, `saas`, `portfolio`, `docs`, `ecommerce`, `local-business`, `blog-media` |
-| `--config <path>`      | `-c`  | auto-discovered | Configuration file to load                                                                        |
-| `--output <file>`      | `-o`  | stdout          | Write the report to a file                                                                        |
-| `--timeout <ms>`       |       | `10000`         | Per-request timeout                                                                               |
-| `--user-agent <ua>`    |       | toolbox default | Override the crawler user agent                                                                   |
-| `--no-resolve-links`   |       | resolve         | Skip the HEAD requests that verify links inside `llms.txt`                                        |
-| `--no-agent-fetch`     |       | enabled         | Skip the live GPTBot and OAI-SearchBot firewall comparison                                        |
-| `--verbose`            | `-v`  | `false`         | Log progress and timing to stderr                                                                 |
-| `--no-color`           |       | TTY-dependent   | Disable ANSI colour (also honours `NO_COLOR`)                                                     |
+| Flag                    | Short | Default         | Description                                                                                       |
+| :---------------------- | :---- | :-------------- | :------------------------------------------------------------------------------------------------ |
+| `--format <type>`       | `-f`  | `table`         | `table`, `json`, `markdown`, `summary` or `brief` (plain-language change requests)                |
+| `--min-score <number>`  | `-s`  | `0`             | Composite score required to pass (0–100)                                                          |
+| `--min-grade <grade>`   | `-g`  | `F`             | Letter grade required to pass (`A`, `B`, `C`, `D`, `F`)                                           |
+| `--site-type <type>`    | `-t`  | `auto`          | Force a profile: `auto`, `saas`, `portfolio`, `docs`, `ecommerce`, `local-business`, `blog-media` |
+| `--config <path>`       | `-c`  | auto-discovered | Configuration file to load                                                                        |
+| `--output <file>`       | `-o`  | stdout          | Write the report to a file                                                                        |
+| `--timeout <ms>`        |       | `10000`         | Per-request timeout                                                                               |
+| `--user-agent <ua>`     |       | toolbox default | Override the crawler user agent                                                                   |
+| `--header <name:value>` |       |                 | Extra request header; repeat for multiple headers                                                 |
+| `--no-resolve-links`    |       | resolve         | Skip the HEAD requests that verify links inside `llms.txt`                                        |
+| `--no-agent-fetch`      |       | enabled         | Skip the live GPTBot and OAI-SearchBot firewall comparison                                        |
+| `--verbose`             | `-v`  | `false`         | Log progress and timing to stderr                                                                 |
+| `--no-color`            |       | TTY-dependent   | Disable ANSI colour (also honours `NO_COLOR`)                                                     |
 
 Exit codes: **0** threshold met, **1** audit completed below a threshold, **2**
 the audit could not run (bad arguments, unreachable host, timeout).
@@ -183,6 +184,10 @@ to get started.
 }
 ```
 
+Add a `headers` object (or repeat `--header`) when a staging or preview host
+needs an extra request header. For example, Vercel's automation bypass uses
+`{"headers": {"x-vercel-protection-bypass": "..."}}`.
+
 ## GitHub Action
 
 [`actions/audit`](actions/audit/action.yml) wraps the same engine. It audits the
@@ -204,18 +209,19 @@ threshold.
     github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-| Input           | Default               | Description                                      |
-| :-------------- | :-------------------- | :----------------------------------------------- |
-| `url`           | required              | Target URL to audit                              |
-| `min-score`     | `75`                  | Minimum composite score required to pass         |
-| `min-grade`     | `B`                   | Minimum letter grade required to pass            |
-| `site-type`     | `auto`                | Force a profile or keep automatic classification |
-| `comment-on-pr` | `true`                | Create or update the sticky pull request comment |
-| `github-token`  | `${{ github.token }}` | Token used to write the comment                  |
-| `timeout`       | `10000`               | Per-request timeout in milliseconds              |
-| `report-style`  | `technical`           | `technical` matrix, or `plain` change requests   |
-| `resolve-links` | `true`                | Verify up to six links inside `llms.txt`         |
-| `agent-fetch`   | `true`                | Compare a live fetch as GPTBot and OAI-SearchBot |
+| Input           | Default               | Description                                       |
+| :-------------- | :-------------------- | :------------------------------------------------ |
+| `url`           | required              | Target URL to audit                               |
+| `min-score`     | `75`                  | Minimum composite score required to pass          |
+| `min-grade`     | `B`                   | Minimum letter grade required to pass             |
+| `site-type`     | `auto`                | Force a profile or keep automatic classification  |
+| `comment-on-pr` | `true`                | Create or update the sticky pull request comment  |
+| `github-token`  | `${{ github.token }}` | Token used to write the comment                   |
+| `timeout`       | `10000`               | Per-request timeout in milliseconds               |
+| `report-style`  | `technical`           | `technical` matrix, or `plain` change requests    |
+| `resolve-links` | `true`                | Verify up to six links inside `llms.txt`          |
+| `agent-fetch`   | `true`                | Compare a live fetch as GPTBot and OAI-SearchBot  |
+| `headers`       | none                  | Extra request headers, one `Name: value` per line |
 
 Outputs: `score`, `grade`, `passed` and `report-json`.
 
@@ -223,8 +229,12 @@ Set `report-style: plain` when the comment is read by people outside engineering
 
 The repository dogfoods the action in
 [`.github/workflows/llm-seo-toolbox-audit.yml`](.github/workflows/llm-seo-toolbox-audit.yml).
-The audited URL defaults to `https://llm-seo-toolbox.vercel.app` and can be
-overridden with the `LLM_SEO_TOOLBOX_AUDIT_URL` repository variable.
+Pull requests audit the Vercel preview URL discovered from the Vercel pull
+request comment; pushes to `main` and manual runs audit
+`https://llm-seo-toolbox.vercel.app`, or the `LLM_SEO_TOOLBOX_AUDIT_URL`
+repository variable when set. If preview deployments use Vercel Deployment
+Protection, add the `VERCEL_AUTOMATION_BYPASS_SECRET` repository secret so the
+workflow can send the `x-vercel-protection-bypass` header.
 
 Pull requests from forks receive a read-only token, so the comment step logs a
 warning and the audit still runs.

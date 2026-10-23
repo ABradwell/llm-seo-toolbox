@@ -100,6 +100,7 @@ export async function run(argv: string[]): Promise<RunResult> {
     output: merged.output,
     timeout: merged.timeout ?? DEFAULT_OPTIONS.timeout,
     userAgent: merged.userAgent ?? DEFAULT_OPTIONS.userAgent,
+    headers: merged.headers,
     resolveLinks: merged.resolveLinks ?? true,
     agentFetch: merged.agentFetch ?? true,
     verbose: merged.verbose ?? false,
@@ -119,6 +120,9 @@ export async function run(argv: string[]): Promise<RunResult> {
       `target ${options.url} · timeout ${options.timeout}ms · format ${options.format}`,
     );
     verboseLog(palette, `profile ${options.siteType ?? "auto"} · user-agent ${options.userAgent}`);
+    if (options.headers && Object.keys(options.headers).length > 0) {
+      verboseLog(palette, `headers ${Object.keys(options.headers).join(", ")}`);
+    }
   }
 
   const startedAt = Date.now();
@@ -129,6 +133,7 @@ export async function run(argv: string[]): Promise<RunResult> {
       siteType: options.siteType,
       timeoutMs: options.timeout,
       userAgent: options.userAgent,
+      headers: options.headers,
       resolveLinks: options.resolveLinks,
       agentFetch: options.agentFetch,
       cache: false,

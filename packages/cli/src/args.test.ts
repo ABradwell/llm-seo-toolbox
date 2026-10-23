@@ -5,6 +5,7 @@ import {
   parseArgs,
   parseFormat,
   parseGrade,
+  parseHeader,
   parseScore,
   parseSiteType,
   parseTimeout,
@@ -59,6 +60,19 @@ describe("parseArgs", () => {
     expect(parsed.options?.agentFetch).toBe(false);
   });
 
+  it("collects repeatable request headers", () => {
+    const parsed = parseArgs([
+      "example.com",
+      "--header",
+      "x-vercel-protection-bypass: secret",
+      "--header=x-custom: value",
+    ]);
+    expect(parsed.options?.headers).toEqual({
+      "x-vercel-protection-bypass": "secret",
+      "x-custom": "value",
+    });
+  });
+
   it("reads help and version without requiring a URL", () => {
     expect(parseArgs(["--help"])).toMatchObject({ help: true, options: null });
     expect(parseArgs(["--version"])).toMatchObject({ version: true, options: null });
@@ -100,5 +114,15 @@ describe("value parsers", () => {
     expect(parseTimeout("10000")).toBe(10000);
     expect(() => parseTimeout("10")).toThrow(/timeout/);
     expect(() => parseTimeout("999999")).toThrow(/timeout/);
+  });
+
+  it("validates request headers", () => {
+    expect(parseHeader("x-vercel-protection-bypass: secret")).toEqual([
+      "x-vercel-protection-bypass",
+      "secret",
+    ]);
+    expect(() => parseHeader("missing-colon")).toThrow(/Name: value/);
+    expect(() => parseHeader(": secret")).toThrow(/invalid name/);
+    expect(() => parseHeader("x-empty:")).toThrow(/needs a value/);
   });
 });

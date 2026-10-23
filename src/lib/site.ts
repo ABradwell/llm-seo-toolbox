@@ -32,6 +32,7 @@ export const siteConfig = {
   description:
     "An open-source AI compatibility auditor. Classify a site into one of six profiles, then validate /llms.txt, RFC 9309 robots.txt, static HTML signal-to-noise and profile-specific schema.org metadata.",
   github: process.env.NEXT_PUBLIC_GITHUB_URL ?? "https://github.com/ABradwell/llm-seo-toolbox",
+  vercelProject: "https://vercel.com/bradwell-applications/llm-seo-toolbox",
   coffee: process.env.NEXT_PUBLIC_BMC_URL ?? "https://buymeacoffee.com/bradwell",
   repoName: "llm-seo-toolbox",
   llmsTxtSpec: "https://llmstxt.org/",

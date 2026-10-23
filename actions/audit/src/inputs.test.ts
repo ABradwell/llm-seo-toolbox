@@ -16,6 +16,7 @@ describe("readInputs", () => {
       reportStyle: "technical",
       resolveLinks: true,
       agentFetch: true,
+      headers: {},
     });
   });
 
@@ -69,6 +70,21 @@ describe("readInputs", () => {
     expect(() => readInputs({ INPUT_URL: "x", "INPUT_AGENT-FETCH": "maybe" })).toThrow(
       /agent-fetch/,
     );
+  });
+
+  it("parses optional request headers and skips empty values", () => {
+    const inputs = readInputs({
+      INPUT_URL: "x",
+      INPUT_HEADERS: "x-vercel-protection-bypass: secret\n\n# comment\nx-empty:\nx-custom: value",
+    });
+    expect(inputs.headers).toEqual({
+      "x-vercel-protection-bypass": "secret",
+      "x-custom": "value",
+    });
+    expect(() => readInputs({ INPUT_URL: "x", INPUT_HEADERS: "missing-colon" })).toThrow(
+      /Name: value/,
+    );
+    expect(() => readInputs({ INPUT_URL: "x", INPUT_HEADERS: ": secret" })).toThrow(/invalid name/);
   });
 
   it("rejects missing and malformed inputs", () => {

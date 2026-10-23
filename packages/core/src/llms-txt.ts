@@ -279,6 +279,7 @@ export async function resolveLlmsTxtLinks(
   input: {
     origin: string;
     timeoutMs?: number;
+    headers?: Record<string, string>;
     head?: typeof headUrl;
   },
 ): Promise<LlmsResolvedLink[]> {
@@ -306,6 +307,7 @@ export async function resolveLlmsTxtLinks(
         const remaining = Math.max(300, Math.min(1_500, deadline - Date.now()));
         const response = await head(link.url, {
           timeoutMs: Math.min(input.timeoutMs ?? remaining, remaining),
+          headers: input.headers,
         });
         const external = declaredExternal(link);
         let offOrigin = false;

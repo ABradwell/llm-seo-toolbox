@@ -2,41 +2,34 @@
 
 > An open-source AI compatibility auditor. Classify a site into one of six profiles, sample up to eight pages, then validate /llms.txt, RFC 9309 robots.txt, static HTML signal-to-noise and profile-specific schema.org metadata.
 
+## Start here
+
+- [Home](/): What LLMReady checks, how the score works and how to run an audit.
+- [Audit workspace](/app): Classify a site, run the 49-check audit matrix against a deterministic page sample and inspect line-level fixes.
+- [OpenAPI description](/openapi.json): OpenAPI 3.1 schema for `GET /api/audit`.
+- [Expanded context](/llms-full.txt): The full audit model in one request.
+- [Sitemap](/sitemap.xml): Canonical pages on this deployment.
+- [Robots policy](/robots.txt): RFC 9309 rules with named AI crawler groups.
+- [API catalog](/.well-known/api-catalog): RFC 9727 linkset pointing at the OpenAPI description.
+
 ## Product
 
-- [Audit workspace](https://github.com/ABradwell/llm-seo-toolbox#readme): Classify a site, run the 49-check audit matrix against a deterministic page sample and inspect line-level fixes.
-- [Site score vs page score](https://github.com/ABradwell/llm-seo-toolbox#site-score-vs-page-score): The origin-scoped score, deterministic sampling and the `scope=page` fallback.
-- [Site classification](https://github.com/ABradwell/llm-seo-toolbox#site-classification): The six profiles and the signals behind them, with manual override.
-- [Scoring model](https://github.com/ABradwell/llm-seo-toolbox#scoring-model): The checks the audit enforces, with pass conditions.
-- [API](https://github.com/ABradwell/llm-seo-toolbox#api): `GET /api/audit?url=example.com` returns the full JSON report, including `classification`, `coverage` and `focusPage`.
+- [CLI](/#cli): Run the same audit from a terminal with table, JSON, markdown or summary output and CI-friendly exit codes.
+- [GitHub Action](/#action): Audit a deployment on every pull request, keep one sticky report comment current and fail below a score or grade threshold.
+- [Site score vs page score](/#faq): The origin-scoped score, deterministic sampling and the `scope=page` fallback.
+- [Site classification](/#pipeline): The six profiles and the signals behind them, with manual override.
+- [Scoring model](/#faq): The checks the audit enforces, with pass conditions.
 
-## Developer tools
-
-- [CLI](https://github.com/ABradwell/llm-seo-toolbox#cli): `llm-seo-toolbox example.com` runs the same audit with table, JSON, markdown or summary output and CI-friendly exit codes.
-- [GitHub Action](https://github.com/ABradwell/llm-seo-toolbox#github-action): Audit a deployment on every pull request, keep one sticky report comment current and fail the job below a score or grade threshold.
-- [Workspace packages](https://github.com/ABradwell/llm-seo-toolbox#workspace-layout): `@llm-seo-toolbox/core` is shared by the web app, CLI and action.
-
-## Standards
+## Standards (external)
 
 - [llms.txt specification](https://llmstxt.org/): The manifest structure this project validates.
 - [RFC 9309](https://www.rfc-editor.org/rfc/rfc9309): Robots Exclusion Protocol.
 - [schema.org](https://schema.org/): Structured data vocabularies used by the audit.
 
-## Machine-readable
-
-- [OpenAPI description](https://llm-seo-toolbox.vercel.app/openapi.json): OpenAPI 3.1 schema for `GET /api/audit`.
-- [Sitemap](https://llm-seo-toolbox.vercel.app/sitemap.xml): Canonical pages on this deployment.
-- [Robots policy](https://llm-seo-toolbox.vercel.app/robots.txt): RFC 9309 rules with named AI crawler groups.
-- [Security contact](https://llm-seo-toolbox.vercel.app/.well-known/security.txt): RFC 9116 vulnerability disclosure details.
-- [Expanded context](https://llm-seo-toolbox.vercel.app/llms-full.txt): The full audit model in one request.
-
-## Project
+## Project (external)
 
 - [Source code](https://github.com/ABradwell/llm-seo-toolbox): GPL-3.0-only.
-- [Deploy on Vercel](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FABradwell%2Fllm-seo-toolbox): One-click deployment.
-- [Buy me a coffee](https://www.buymeacoffee.com): Support the project.
-
-## Optional
-
 - [Issues](https://github.com/ABradwell/llm-seo-toolbox/issues): Report a bug or request a check.
 - [Contributing](https://github.com/ABradwell/llm-seo-toolbox/blob/main/README.md#contributing): Run the full validation suite before opening a PR.
+- [Deploy on Vercel](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FABradwell%2Fllm-seo-toolbox): One-click deployment.
+- [Buy me a coffee](https://buymeacoffee.com/bradwell): Support the project.

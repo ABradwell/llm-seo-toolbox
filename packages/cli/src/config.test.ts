@@ -45,6 +45,7 @@ describe("loadConfig", () => {
         "min-grade": "c",
         "site-type": "auto",
         "user-agent": "Custom/1.0",
+        headers: { "x-vercel-protection-bypass": "secret" },
         "resolve-links": false,
         "agent-fetch": false,
       }),
@@ -56,6 +57,7 @@ describe("loadConfig", () => {
       minGrade: "C",
       siteType: null,
       userAgent: "Custom/1.0",
+      headers: { "x-vercel-protection-bypass": "secret" },
       resolveLinks: false,
       agentFetch: false,
     });
@@ -117,5 +119,13 @@ describe("mergeOptions", () => {
     const merged = mergeOptions({ resolveLinks: true, agentFetch: true }, { agentFetch: false });
     expect(merged.resolveLinks).toBe(true);
     expect(merged.agentFetch).toBe(false);
+  });
+
+  it("merges headers with CLI values winning per name", () => {
+    const merged = mergeOptions(
+      { headers: { "x-base": "config", "x-shared": "config" } },
+      { headers: { "x-shared": "cli" } },
+    );
+    expect(merged.headers).toEqual({ "x-base": "config", "x-shared": "cli" });
   });
 });

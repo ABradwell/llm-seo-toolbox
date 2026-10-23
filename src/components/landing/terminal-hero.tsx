@@ -36,21 +36,23 @@ export function TerminalHero() {
             <span className="text-accent-light"> actually read.</span>
           </h1>
 
+          <p className="mt-5 max-w-xl text-sm leading-relaxed text-parchment/75 sm:text-base">
+            <span className="font-medium text-parchment">LLMReady</span> is an open-source AI
+            compatibility auditor. It classifies a site, samples up to eight pages, then checks{" "}
+            <span className="font-mono text-parchment">/llms.txt</span>, RFC 9309 crawler access,
+            static HTML signal-to-noise and the schema.org types that profile expects. Every miss
+            comes with the exact line and the code that fixes it, so a team can ship the specs AI
+            crawlers actually read.
+          </p>
+
           <div className="mt-7 max-w-xl">
             <QuickAuditBar size="hero" />
           </div>
 
-          <p className="mt-5 max-w-xl text-sm leading-relaxed text-parchment/75 sm:text-base">
-            <span className="font-medium text-parchment">LLMReady</span> classifies the site, then
-            audits <span className="font-mono text-parchment">/llms.txt</span>, RFC 9309 access
-            rules, static HTML signal-to-noise and the schema.org types that profile expects — with
-            the exact line and code that fixes each miss.
-          </p>
-
           <dl className="mt-8 grid max-w-xl grid-cols-3 border-t border-parchment/15 pt-4">
             {[
               { value: "4", label: "protocol families" },
-              { value: "20", label: "granular checks" },
+              { value: "49", label: "granular checks" },
               { value: "0", label: "signup / cookies" },
             ].map((item) => (
               <div key={item.label}>

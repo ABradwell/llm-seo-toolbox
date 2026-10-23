@@ -8,6 +8,8 @@ export interface FetchTextOptions {
   timeoutMs?: number;
   maxBytes?: number;
   userAgent?: string;
+  /** Extra request headers, used for protected previews and staging hosts. */
+  headers?: Record<string, string>;
 }
 
 export interface FetchTextOutcome {
@@ -125,6 +127,7 @@ export async function fetchText(
           "user-agent": options.userAgent ?? AUDIT_USER_AGENT,
           accept,
           "accept-language": "en-US,en;q=0.9",
+          ...options.headers,
         },
       });
     } catch (error) {
@@ -189,7 +192,11 @@ export async function fetchText(
 /** A HEAD request with the same SSRF-safe redirect handling as fetchText. */
 export async function headUrl(
   input: string | URL,
-  options: { timeoutMs?: number; userAgent?: string } = {},
+  options: {
+    timeoutMs?: number;
+    userAgent?: string;
+    headers?: Record<string, string>;
+  } = {},
 ): Promise<HeadOutcome> {
   let current: URL;
 
@@ -217,6 +224,7 @@ export async function headUrl(
         headers: {
           "user-agent": options.userAgent ?? AUDIT_USER_AGENT,
           accept: "*/*",
+          ...options.headers,
         },
       });
     } catch (error) {
