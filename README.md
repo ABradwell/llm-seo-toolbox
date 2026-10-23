@@ -223,21 +223,31 @@ threshold.
 | `agent-fetch`   | `true`                | Compare a live fetch as GPTBot and OAI-SearchBot  |
 | `headers`       | none                  | Extra request headers, one `Name: value` per line |
 
+Extra headers are sent only to the audited origin; external links and
+cross-origin redirects never receive them.
+
 Outputs: `score`, `grade`, `passed` and `report-json`.
 
 Set `report-style: plain` when the comment is read by people outside engineering. The comment then leads with the pass or fail verdict, followed by the same plain-language change requests as the web app, with technical references for the developer.
 
 The repository dogfoods the action in
 [`.github/workflows/llm-seo-toolbox-audit.yml`](.github/workflows/llm-seo-toolbox-audit.yml).
-Pull requests audit the Vercel preview URL discovered from the Vercel pull
-request comment; pushes to `main` and manual runs audit
-`https://llm-seo-toolbox.vercel.app`, or the `LLM_SEO_TOOLBOX_AUDIT_URL`
-repository variable when set. If preview deployments use Vercel Deployment
-Protection, add the `VERCEL_AUTOMATION_BYPASS_SECRET` repository secret so the
-workflow can send the `x-vercel-protection-bypass` header.
+Pull requests audit the Vercel preview deployment for the pull request head
+commit, resolved from the Vercel REST API. The workflow waits up to ten minutes
+for the deployment to become `READY`, then audits its deployment URL. Pushes to
+`main` and manual runs audit `https://llm-seo-toolbox.vercel.app`, or the
+`LLM_SEO_TOOLBOX_AUDIT_URL` repository variable when set.
 
-Pull requests from forks receive a read-only token, so the comment step logs a
-warning and the audit still runs.
+Preview audits need a `VERCEL_TOKEN` repository secret with access to the
+project's team, plus `VERCEL_PROJECT_ID` and `VERCEL_TEAM_ID` repository
+variables (the team slug falls back to `bradwell-applications`). Preview
+deployments for this repository use Vercel Deployment Protection, so add the
+`VERCEL_AUTOMATION_BYPASS_SECRET` repository secret as well. The workflow sends
+it only to the audited origin, so it is never forwarded to external links in
+`llms.txt` or to cross-origin redirects.
+
+Pull requests from forks do not receive repository secrets, so the preview
+resolver cannot run. Run the audit from a same-repo branch or locally instead.
 
 ## Workspace layout
 

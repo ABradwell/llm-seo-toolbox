@@ -10,6 +10,11 @@ export interface FetchTextOptions {
   userAgent?: string;
   /** Extra request headers, used for protected previews and staging hosts. */
   headers?: Record<string, string>;
+  /**
+   * Origin that may receive `headers`. Defaults to the first URL's origin so a
+   * protection bypass never travels to external links or cross-origin redirects.
+   */
+  headersOrigin?: string;
 }
 
 export interface FetchTextOutcome {
@@ -34,6 +39,19 @@ export interface HeadOutcome {
 }
 
 const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308]);
+
+/**
+ * Returns the extra headers only for the audited origin. Protected-preview
+ * bypass headers must not travel to external links or cross-origin redirects.
+ */
+export function headersForOrigin(
+  url: URL,
+  origin: string,
+  headers?: Record<string, string>,
+): Record<string, string> | undefined {
+  if (!headers || url.origin !== origin) return undefined;
+  return headers;
+}
 
 function failure(url: string, error: string, options?: { status?: number; unsafe?: boolean }) {
   return {
@@ -108,6 +126,7 @@ export async function fetchText(
     return failure(String(input), "The URL could not be validated.", { unsafe: true });
   }
 
+  const headerOrigin = options.headersOrigin ?? current.origin;
   const maxBytes = options.maxBytes ?? 1_500_000;
   const timeoutMs = options.timeoutMs ?? 7_000;
   const accept =
@@ -127,7 +146,7 @@ export async function fetchText(
           "user-agent": options.userAgent ?? AUDIT_USER_AGENT,
           accept,
           "accept-language": "en-US,en;q=0.9",
-          ...options.headers,
+          ...(headersForOrigin(current, headerOrigin, options.headers) ?? {}),
         },
       });
     } catch (error) {
@@ -196,6 +215,7 @@ export async function headUrl(
     timeoutMs?: number;
     userAgent?: string;
     headers?: Record<string, string>;
+    headersOrigin?: string;
   } = {},
 ): Promise<HeadOutcome> {
   let current: URL;
@@ -211,6 +231,7 @@ export async function headUrl(
     };
   }
 
+  const headerOrigin = options.headersOrigin ?? current.origin;
   const timeoutMs = options.timeoutMs ?? 3_000;
 
   for (let hop = 0; hop < 5; hop += 1) {
@@ -224,7 +245,7 @@ export async function headUrl(
         headers: {
           "user-agent": options.userAgent ?? AUDIT_USER_AGENT,
           accept: "*/*",
-          ...options.headers,
+          ...(headersForOrigin(current, headerOrigin, options.headers) ?? {}),
         },
       });
     } catch (error) {

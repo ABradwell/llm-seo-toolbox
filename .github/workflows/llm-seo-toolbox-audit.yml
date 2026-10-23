@@ -41,55 +41,55 @@ jobs:
       - name: Resolve audit target
         id: target
         env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+          VERCEL_TEAM_ID: ${{ vars.VERCEL_TEAM_ID }}
+          VERCEL_TEAM_SLUG: ${{ vars.VERCEL_TEAM_SLUG || 'bradwell-applications' }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          VERCEL_PREVIEW_TIMEOUT_SECONDS: ${{ vars.VERCEL_PREVIEW_TIMEOUT_SECONDS || '600' }}
+          VERCEL_PREVIEW_POLL_SECONDS: ${{ vars.VERCEL_PREVIEW_POLL_SECONDS || '10' }}
         run: |
-          if [ -z "$PR_NUMBER" ]; then
+          if [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
             echo "url=${{ vars.LLM_SEO_TOOLBOX_AUDIT_URL || 'https://llm-seo-toolbox.vercel.app' }}" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          url=""
-          for attempt in $(seq 1 36); do
-            url=$(gh api "repos/${{ github.repository }}/issues/$PR_NUMBER/comments" --paginate \
-              --jq '.[] | select(.user.login | test("vercel"; "i")) | .body' \
-              | grep -oE 'https://[a-z0-9-]+-git-[a-z0-9-]+\.vercel\.app' \
-              | head -n 1)
-            if [ -n "$url" ]; then break; fi
-            sleep 5
-          done
-
-          if [ -z "$url" ]; then
-            echo "::error::Could not find a Vercel preview URL for PR #$PR_NUMBER. Wait for the Vercel deployment comment or set the LLM_SEO_TOOLBOX_AUDIT_URL repository variable."
-            exit 1
-          fi
-
-          echo "Resolved Vercel preview: $url"
-          echo "url=$url" >> "$GITHUB_OUTPUT"
+          node scripts/vercel-preview-url.mjs
 
       - name: Verify preview access
         if: github.event_name == 'pull_request'
         env:
           TARGET: ${{ steps.target.outputs.url }}
         run: |
-          args=(-sS -o /dev/null -w '%{http_code} %{url_effective}' -L --max-time 30)
+          # Do not follow redirects here: the bypass header must only reach the
+          # preview host. The audit itself follows same-origin redirects safely.
+          args=(-sS -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 30)
           if [ -n "$VERCEL_AUTOMATION_BYPASS_SECRET" ]; then
             args+=(-H "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET")
           fi
 
           result=$(curl "${args[@]}" "$TARGET")
           status=${result%% *}
-          effective=${result#* }
-          case "$effective" in
+          location=${result#* }
+
+          case "$status" in
+            2*|3*) ;;
+            401|403)
+              echo "::error::The Vercel preview rejected the audit request (HTTP $status). Check VERCEL_AUTOMATION_BYPASS_SECRET or disable Deployment Protection for previews."
+              exit 1
+              ;;
+            *)
+              echo "::error::The Vercel preview returned HTTP $status."
+              exit 1
+              ;;
+          esac
+
+          case "$location" in
             *vercel.com/sso-api*|*vercel.com/login*)
               echo "::error::The Vercel preview is protected by SSO. Add the VERCEL_AUTOMATION_BYPASS_SECRET repository secret or disable Deployment Protection for previews, then re-run this job."
               exit 1
               ;;
           esac
-          if [ "$status" = "401" ] || [ "$status" = "403" ]; then
-            echo "::error::The Vercel preview rejected the audit request (HTTP $status). Check VERCEL_AUTOMATION_BYPASS_SECRET or disable Deployment Protection for previews."
-            exit 1
-          fi
 
       - name: Audit the deployment
         uses: ./actions/audit

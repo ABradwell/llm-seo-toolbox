@@ -250,6 +250,35 @@ describe("resolveLlmsTxtLinks", () => {
     expect(results[0].ok).toBe(false);
   });
 
+  it("passes the audited origin so external links can drop bypass headers", async () => {
+    const calls: Array<{ url: string; headersOrigin?: string }> = [];
+    const head = async (url: string | URL, options: { headersOrigin?: string } = {}) => {
+      calls.push({ url: String(url), headersOrigin: options.headersOrigin });
+      return {
+        ok: true,
+        status: 200,
+        finalUrl: String(url),
+        error: null,
+      };
+    };
+    const external = extractLlmsTxtLinks(
+      "## External resources\n- [Partner](https://partner.example/docs)",
+      "https://example.com/",
+    );
+
+    await resolveLlmsTxtLinks(external, {
+      origin: "https://example.com",
+      headers: { "x-vercel-protection-bypass": "secret" },
+      headersOrigin: "https://example.com",
+      head,
+    });
+
+    expect(calls[0]).toEqual({
+      url: "https://partner.example/docs",
+      headersOrigin: "https://example.com",
+    });
+  });
+
   it("accepts an off-origin link declared as external", async () => {
     const external = extractLlmsTxtLinks(
       "## External resources\n- [Partner](https://partner.example/docs)",
