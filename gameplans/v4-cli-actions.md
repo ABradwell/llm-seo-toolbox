@@ -319,9 +319,12 @@ names and layout follow the repository, not the draft. What changed:
   writes the job summary, keeps one sticky PR comment up to date, exposes
   `score`, `grade`, `passed` and `report-json` outputs, and exits non-zero when
   the gate fails.
-- **Dogfooding.** The pipeline audits the repository's production deployment at
-  `https://llm-seo-toolbox.vercel.app` (overridable with the
-  `LLM_SEO_TOOLBOX_AUDIT_URL` repository variable) at a minimum of 80 points and
-  grade B, because `llmready.dev` belongs to an unrelated product.
+- **Dogfooding.** The pipeline audits the Vercel preview deployment for each pull
+  request head commit and waits for the production deployment for each `main`
+  push, resolved from the Vercel REST API, then audits the production deployment
+  at `https://llm-seo-toolbox.vercel.app` on `main` and manual runs (overridable
+  with the `LLM_SEO_TOOLBOX_AUDIT_URL` repository variable). Both gates require
+  a minimum of 80 points and grade B, because `llmready.dev` belongs to an
+  unrelated product.
 
 ```

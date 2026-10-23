@@ -96,6 +96,7 @@ export interface AnalyzeOptions {
 const SCORING_VERSION = "site-2" as const;
 
 interface FetchSettings {
+  origin: string;
   timeoutMs: number;
   userAgent?: string;
   headers?: Record<string, string>;
@@ -255,6 +256,7 @@ async function expandSitemap(
     timeoutMs: settings.timeoutMs,
     userAgent: settings.userAgent,
     headers: settings.headers,
+    headersOrigin: settings.origin,
     maxBytes: 4_000_000,
   });
 
@@ -430,6 +432,7 @@ async function probeApiCatalog(origin: string, settings: FetchSettings): Promise
     timeoutMs: settings.timeoutMs,
     userAgent: settings.userAgent,
     headers: settings.headers,
+    headersOrigin: settings.origin,
     maxBytes: 400_000,
   });
 
@@ -491,6 +494,7 @@ async function probeOpenApi(
         timeoutMs: settings.timeoutMs,
         userAgent: settings.userAgent,
         headers: settings.headers,
+        headersOrigin: settings.origin,
         maxBytes: 1_000_000,
       });
 
@@ -536,6 +540,7 @@ async function probeWellKnown(origin: string, settings: FetchSettings): Promise<
         timeoutMs: settings.timeoutMs,
         userAgent: settings.userAgent,
         headers: settings.headers,
+        headersOrigin: settings.origin,
         maxBytes: 400_000,
       });
       return {
@@ -652,6 +657,7 @@ async function probeFeed(metadata: PageMetadata, settings: FetchSettings): Promi
     timeoutMs: settings.timeoutMs,
     userAgent: settings.userAgent,
     headers: settings.headers,
+    headersOrigin: settings.origin,
     maxBytes: 1_000_000,
   });
 
@@ -754,6 +760,7 @@ async function probeMarkdownMirror(input: {
     timeoutMs: settings.timeoutMs,
     userAgent: settings.userAgent,
     headers: settings.headers,
+    headersOrigin: settings.origin,
     maxBytes: 1_500_000,
   });
   if (
@@ -770,6 +777,7 @@ async function probeMarkdownMirror(input: {
       timeoutMs: settings.timeoutMs,
       userAgent: settings.userAgent,
       headers: settings.headers,
+      headersOrigin: settings.origin,
       maxBytes: 1_500_000,
     });
     if (response.ok && looksLikeMarkdown(response.body)) {
@@ -787,6 +795,7 @@ async function probeMarkdownMirror(input: {
     timeoutMs: settings.timeoutMs,
     userAgent: settings.userAgent,
     headers: settings.headers,
+    headersOrigin: settings.origin,
     maxBytes: 1_500_000,
   });
   if (siblingResponse.ok && looksLikeMarkdown(siblingResponse.body)) {
@@ -817,6 +826,7 @@ async function probeAgentFetch(input: {
       timeoutMs: settings.timeoutMs,
       userAgent: crawlerUserAgent(label),
       headers: settings.headers,
+      headersOrigin: settings.origin,
       maxBytes: 2_500_000,
     });
 
@@ -2068,6 +2078,7 @@ async function loadDiscovery(origin: string, settings: FetchSettings): Promise<D
         timeoutMs: settings.timeoutMs,
         userAgent: settings.userAgent,
         headers: settings.headers,
+        headersOrigin: settings.origin,
         maxBytes: 300_000,
       }),
       fetchText(new URL("/llms.txt", origin), {
@@ -2075,6 +2086,7 @@ async function loadDiscovery(origin: string, settings: FetchSettings): Promise<D
         timeoutMs: settings.timeoutMs,
         userAgent: settings.userAgent,
         headers: settings.headers,
+        headersOrigin: settings.origin,
         maxBytes: 400_000,
       }),
       fetchText(new URL("/llms-full.txt", origin), {
@@ -2082,6 +2094,7 @@ async function loadDiscovery(origin: string, settings: FetchSettings): Promise<D
         timeoutMs: settings.timeoutMs,
         userAgent: settings.userAgent,
         headers: settings.headers,
+        headersOrigin: settings.origin,
         maxBytes: 2_000_000,
       }),
       fetchText(new URL("/sitemap.xml", origin), {
@@ -2089,6 +2102,7 @@ async function loadDiscovery(origin: string, settings: FetchSettings): Promise<D
         timeoutMs: settings.timeoutMs,
         userAgent: settings.userAgent,
         headers: settings.headers,
+        headersOrigin: settings.origin,
         maxBytes: 4_000_000,
       }),
       probeWellKnown(origin, settings),
@@ -2160,6 +2174,7 @@ function fetchHtml(
     timeoutMs,
     userAgent: settings.userAgent,
     headers: settings.headers,
+    headersOrigin: settings.origin,
     maxBytes: 2_500_000,
   });
 }
@@ -2274,8 +2289,9 @@ function focusFailure(input: {
   };
 }
 
-function fetchSettings(options: AnalyzeOptions): FetchSettings {
+function fetchSettings(options: AnalyzeOptions, origin: string): FetchSettings {
   return {
+    origin,
     timeoutMs: options.timeoutMs ?? STANDARD_TIMEOUT_MS,
     userAgent: options.userAgent,
     headers: options.headers,
@@ -2283,7 +2299,7 @@ function fetchSettings(options: AnalyzeOptions): FetchSettings {
 }
 
 async function buildSiteBase(requested: URL, options: AnalyzeOptions): Promise<SiteBase> {
-  const settings = fetchSettings(options);
+  const settings = fetchSettings(options, requested.origin);
   const homeTimeoutMs = options.timeoutMs ?? 9_000;
   const seedUrl = new URL("/", requested.origin);
   let seedResponse: FetchTextOutcome;
@@ -2419,6 +2435,7 @@ async function buildSiteBase(requested: URL, options: AnalyzeOptions): Promise<S
         timeoutMs: settings.timeoutMs,
         userAgent: settings.userAgent,
         headers: settings.headers,
+        headersOrigin: settings.origin,
         maxBytes: PAGE_MAX_BYTES,
       });
 
@@ -2546,6 +2563,7 @@ async function buildSiteBase(requested: URL, options: AnalyzeOptions): Promise<S
           origin,
           timeoutMs: settings.timeoutMs,
           headers: settings.headers,
+          headersOrigin: settings.origin,
         })
       : [];
   const llmsCoverage =
@@ -2644,7 +2662,7 @@ async function buildFocus(
   options: AnalyzeOptions,
 ): Promise<FocusBase> {
   const started = Date.now();
-  const settings = fetchSettings(options);
+  const settings = fetchSettings(options, requested.origin);
   const homeTimeoutMs = options.timeoutMs ?? 9_000;
 
   try {
@@ -2803,7 +2821,7 @@ async function analyzePageScope(
   startedAt: number,
 ): Promise<AuditResult> {
   const cacheEnabled = options.cache !== false;
-  const settings = fetchSettings(options);
+  const settings = fetchSettings(options, requested.origin);
   const homeTimeoutMs = options.timeoutMs ?? 9_000;
   const cacheKey = `${SCORING_VERSION}::${requested.toString()}::${options.siteType ?? "auto"}::page`;
   const hit = cacheEnabled ? readCache(pageScopeCache, cacheKey) : null;
@@ -2925,6 +2943,7 @@ async function analyzePageScope(
           origin,
           timeoutMs: settings.timeoutMs,
           headers: settings.headers,
+          headersOrigin: settings.origin,
         })
       : [];
   const llmsCoverage =
