@@ -49,7 +49,7 @@ export function PlainReport({
   return (
     <div className="space-y-4">
       <div className="grid gap-3 xl:grid-cols-[1.15fr_0.85fr]">
-        <section className="rounded-[4px] border border-line bg-panel p-4 sm:p-5">
+        <section className="min-w-0 rounded-[4px] border border-line bg-panel p-4 sm:p-5">
           <p className="font-mono text-[9px] tracking-[0.16em] text-muted uppercase">
             how AI assistants see {audit.scope === "site" ? "your site" : "this page"}
           </p>
@@ -198,7 +198,7 @@ function ChangeRequestPanel({
   return (
     <section
       id="change-requests"
-      className="flex flex-col rounded-[4px] border border-line bg-panel"
+      className="flex min-w-0 flex-col rounded-[4px] border border-line bg-panel"
       aria-labelledby="change-requests-title"
     >
       <div className="flex items-center justify-between border-b border-line px-4 py-3">
@@ -270,7 +270,7 @@ function ChangeRequestPanel({
         {previewOpen ? (
           <pre
             id="change-requests-preview"
-            className="max-h-64 overflow-auto rounded-[3px] border border-line bg-background p-3 font-mono text-[11px] leading-relaxed break-words whitespace-pre-wrap text-foreground/85"
+            className="max-h-64 overflow-auto rounded-[3px] border border-line bg-background p-3 font-mono text-[11px] leading-relaxed [overflow-wrap:anywhere] whitespace-pre-wrap text-foreground/85"
           >
             {text}
           </pre>
