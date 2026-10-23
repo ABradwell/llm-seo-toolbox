@@ -72,7 +72,13 @@ async function main() {
     throw new Error("VERCEL_TARGET must be preview or production.");
   }
 
-  const token = required("VERCEL_TOKEN");
+  const token = env("VERCEL_TOKEN");
+  if (!token) {
+    throw new Error(
+      "VERCEL_TOKEN is required. Add a Vercel access token with access to the project's team as the VERCEL_TOKEN repository secret.",
+    );
+  }
+
   const repository = required("GITHUB_REPOSITORY");
   const [owner, repoName] = repository.split("/");
   if (!owner || !repoName) {
