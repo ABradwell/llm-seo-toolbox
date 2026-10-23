@@ -4,7 +4,7 @@
 
 ## Product
 
-- [Audit workspace](https://github.com/ABradwell/llm-seo-toolbox#readme): Classify a site, run the 20-check audit matrix against a deterministic page sample and inspect line-level fixes.
+- [Audit workspace](https://github.com/ABradwell/llm-seo-toolbox#readme): Classify a site, run the 49-check audit matrix against a deterministic page sample and inspect line-level fixes.
 - [Site score vs page score](https://github.com/ABradwell/llm-seo-toolbox#site-score-vs-page-score): The origin-scoped score, deterministic sampling and the `scope=page` fallback.
 - [Site classification](https://github.com/ABradwell/llm-seo-toolbox#site-classification): The six profiles and the signals behind them, with manual override.
 - [Scoring model](https://github.com/ABradwell/llm-seo-toolbox#scoring-model): The checks the audit enforces, with pass conditions.

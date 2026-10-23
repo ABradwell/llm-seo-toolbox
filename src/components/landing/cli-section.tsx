@@ -22,7 +22,7 @@ const FEATURES = [
     icon: Terminal,
     label: "Same engine",
     detail:
-      "The 20 checks, site profiles and line-level fixes from the workspace, run locally against any public URL.",
+      "The 49 checks, site profiles and line-level fixes from the workspace, run locally against any public URL.",
   },
   {
     icon: FileJson,

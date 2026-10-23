@@ -14,6 +14,8 @@ describe("readInputs", () => {
       githubToken: null,
       timeoutMs: 10_000,
       reportStyle: "technical",
+      resolveLinks: true,
+      agentFetch: true,
     });
   });
 
@@ -50,6 +52,22 @@ describe("readInputs", () => {
     expect(readInputs({ INPUT_URL: "x", INPUT_REPORT_STYLE: "" }).reportStyle).toBe("technical");
     expect(() => readInputs({ INPUT_URL: "x", "INPUT_REPORT-STYLE": "fancy" })).toThrow(
       /report-style/,
+    );
+  });
+
+  it("can disable llms.txt link resolution and the agent fetch", () => {
+    const inputs = readInputs({
+      INPUT_URL: "x",
+      "INPUT_RESOLVE-LINKS": "false",
+      "INPUT_AGENT-FETCH": "false",
+    });
+    expect(inputs.resolveLinks).toBe(false);
+    expect(inputs.agentFetch).toBe(false);
+    expect(() => readInputs({ INPUT_URL: "x", "INPUT_RESOLVE-LINKS": "maybe" })).toThrow(
+      /resolve-links/,
+    );
+    expect(() => readInputs({ INPUT_URL: "x", "INPUT_AGENT-FETCH": "maybe" })).toThrow(
+      /agent-fetch/,
     );
   });
 

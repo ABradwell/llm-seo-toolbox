@@ -7,6 +7,7 @@ import {
 } from "./plain-language";
 import type { PlainCopyContext, PlainOwner } from "./plain-language";
 import type { AuditReport, AuditReportCheck } from "./report";
+import { accessIntentLine } from "./report";
 import { compareFixPriority } from "./score";
 import { siteTypeById } from "./site-types";
 import type { AuditGrade, CheckEvidence, CheckFix, PillarId } from "./types";
@@ -51,6 +52,8 @@ export interface PlainBrief {
   grade: AuditGrade;
   gradeLabel: string;
   summary: string;
+  /** Crawler intent groups and firewall result, when the report has them. */
+  accessIntent: string | null;
   mustFix: PlainIssue[];
   improve: PlainIssue[];
   working: { id: string; title: string }[];
@@ -148,6 +151,7 @@ export function buildPlainBrief(report: AuditReport): PlainBrief {
       mustFix: mustFix.length,
       improve: improve.length,
     }),
+    accessIntent: accessIntentLine(report),
     mustFix,
     improve,
     working,
@@ -232,6 +236,7 @@ export function renderChangeRequests(
     brief.summary,
     "",
   );
+  if (brief.accessIntent) lines.push(brief.accessIntent, "");
 
   if (mustFix.length === 0 && improve.length === 0) {
     lines.push("No changes requested.", "");

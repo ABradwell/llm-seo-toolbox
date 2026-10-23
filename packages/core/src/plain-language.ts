@@ -55,8 +55,16 @@ export const SITE_CHECK_IDS: readonly string[] = [
   "llms-txt",
   "llms-full-txt",
   "sitemap",
+  "feed",
+  "markdown-mirror",
   "robots-reachable",
   "ai-policy",
+  "access-search",
+  "access-fetch",
+  "access-training",
+  "agent-fetch",
+  "content-signal",
+  "entity-identity",
   ...AI_CRAWLERS.map((crawler) => `bot-${crawler.id}`),
   "openapi",
   "well-known",
@@ -69,8 +77,18 @@ export const PAGE_CHECK_IDS: readonly string[] = [
   "heading-order",
   "snr",
   "ssr-content",
+  "faq-content",
+  "answer-first",
+  "section-chunks",
+  "page-metadata",
+  "image-alt",
+  "citable-evidence",
   "json-ld",
   "schema-types",
+  "schema-depth",
+  "breadcrumbs",
+  "freshness",
+  "canonical",
 ];
 
 export const PLAIN_OWNER_LABELS: Record<PlainOwner, string> = {
@@ -124,9 +142,20 @@ export function plainGradeSummary(
 /** The AI product each crawler feeds, in the words a marketer would use. */
 const CRAWLER_ASSISTANTS: Record<string, string> = {
   gptbot: "ChatGPT",
+  "oai-searchbot": "ChatGPT search",
+  "chatgpt-user": "ChatGPT",
   claudebot: "Claude",
+  "claude-searchbot": "Claude search",
+  "claude-user": "Claude",
   "google-extended": "Gemini",
+  googlebot: "Google Search and Gemini",
+  bingbot: "Bing and Copilot",
   perplexitybot: "Perplexity",
+  "perplexity-user": "Perplexity",
+  "applebot-extended": "Apple Intelligence",
+  "meta-externalagent": "Meta AI",
+  amazonbot: "Amazon search and Alexa",
+  ccbot: "Common Crawl and the models trained on it",
   bytespider: "ByteDance's AI products",
 };
 
@@ -415,13 +444,341 @@ export const PLAIN_CHECK_COPY: Record<string, PlainCheckCopy> = {
     problem: {
       warn: "Your site doesn't publish the standard files that tell automated tools how to contact you or what you allow.",
     },
-    why: "Sites can publish small standard files in a folder called /.well-known/. The most common is security.txt, which says who to contact about security issues. Automated tools and AI agents check this folder for policies like these.",
-    good: "At least a security.txt file at /.well-known/security.txt.",
+    why: "Sites can publish small standard files in a folder called /.well-known/. An API catalog describes where your API documentation lives, and security.txt says who to contact about security issues. Automated tools and AI agents check this folder for policies like these.",
+    good: "An API catalog at /.well-known/api-catalog, plus a security.txt contact file.",
     owner: "developer",
     asks: {
       warn: [
+        "Publish {origin}/.well-known/api-catalog so agents can find the API description.",
         "Publish {origin}/.well-known/security.txt with a security contact and an expiry date.",
-        "Add any other .well-known files that apply to us.",
+      ],
+    },
+  },
+  feed: {
+    title: "A news feed other tools can follow",
+    problem: {
+      fail: "Your site has no news feed, so tools that follow new content have nothing to subscribe to.",
+      warn: "Your site links to a news feed, but the feed could not be read or is empty.",
+    },
+    why: "A feed is a simple list of your newest pages. News readers, search engines and AI tools use it to notice new work without checking every page. It costs little to publish and keeps discovery automatic.",
+    good: "An RSS or Atom feed at a stable address, linked from the homepage.",
+    owner: "developer",
+    asks: {
+      fail: [
+        "Publish an RSS or Atom feed at {origin}/feed.xml.",
+        "Link it from every page with a feed link in the page head.",
+      ],
+      warn: [
+        "Make sure {origin}/feed.xml loads as a feed, not a web page or an error page.",
+        "Check that it contains at least one recent item.",
+      ],
+    },
+  },
+  "markdown-mirror": {
+    title: "A plain-text version of your pages",
+    problem: {
+      fail: "Your site doesn't offer a plain-text version of its pages, so AI tools have to strip the design away themselves.",
+      warn: "A plain-text version was found, but it doesn't match the page, so an AI tool could quote the wrong content.",
+    },
+    why: "A plain-text version of a page removes menus, styling and scripts, leaving only the words. AI tools can read it faster and with fewer mistakes. Documentation and product sites benefit most.",
+    good: "The page returns a matching plain-text version when an AI tool asks for one.",
+    owner: "developer",
+    asks: {
+      fail: [
+        "Serve a plain-text version of each page when a request asks for text instead of a web page.",
+        "Alternatively, publish a matching .md file beside each page and link to it.",
+      ],
+      warn: [
+        "Make the plain-text version start with the same heading as the page.",
+        "Keep it in sync when the page changes.",
+      ],
+    },
+  },
+  "access-search": {
+    title: "AI search and citation crawlers let in",
+    problem: {
+      fail: "Your crawler rules block one or more AI search crawlers on pages you want cited, so those assistants cannot quote them.",
+      warn: "Some AI search crawlers can reach the homepage but not every page you want cited.",
+    },
+    why: "Search and citation crawlers find pages for AI answers and link back to the source. If they are blocked on the pages that matter, those pages cannot appear in the answer.",
+    good: "Every AI search and citation crawler is allowed on the public pages you want quoted.",
+    owner: "developer",
+    asks: {
+      fail: [
+        "Allow OAI-SearchBot, Claude-SearchBot, PerplexityBot, Googlebot and Bingbot on the public pages we want cited.",
+        "Check firewall rules as well as robots.txt, because a firewall can block them before the rules file is read.",
+      ],
+      warn: ["Review the paths blocked for AI search crawlers and allow the public content pages."],
+    },
+  },
+  "access-fetch": {
+    title: "On-demand AI fetch agents let in",
+    problem: {
+      fail: "Your crawler rules block the agents that open a page when a person asks an AI assistant to read it.",
+      warn: "Some on-demand fetch agents are blocked on pages people may ask an assistant to open.",
+    },
+    why: "Fetch agents visit a page only when someone asks an assistant about it. Blocking them means the assistant cannot read the page in that moment, even if search crawlers can index it.",
+    good: "ChatGPT-User, Claude-User and Perplexity-User can open the public pages people share with them.",
+    owner: "developer",
+    asks: {
+      fail: [
+        "Allow ChatGPT-User, Claude-User and Perplexity-User on public pages.",
+        "Check the firewall as well as robots.txt.",
+      ],
+      warn: ["Review which public paths are blocked for on-demand fetch agents."],
+    },
+  },
+  "access-training": {
+    title: "A written decision about AI training",
+    problem: {
+      fail: "Your site does not say whether AI companies may use its content for training.",
+      warn: "Some AI training crawlers follow a general rule rather than a named one, so your choice is not written down.",
+    },
+    why: "Training crawlers collect content for future models. Allowing or blocking them is a business decision, and both are valid. Naming them makes the decision visible and easy to review later.",
+    good: "Each AI training crawler is named in the crawler rules and allowed or blocked on purpose.",
+    owner: "either",
+    asks: {
+      warn: [
+        "Add named entries for GPTBot, ClaudeBot, Google-Extended, Applebot-Extended, Meta-ExternalAgent, CCBot and Bytespider.",
+        "For each one, state whether we allow or block training, and keep the choice consistent with our policy.",
+      ],
+    },
+  },
+  "agent-fetch": {
+    title: "Your firewall lets AI agents in",
+    problem: {
+      fail: "Your firewall turns AI agents away before they can read your crawler rules, so they never see the page.",
+      warn: "Your firewall blocks training crawlers but lets search agents through. That may be intentional, but it should be checked.",
+    },
+    why: "A firewall or bot-protection service can block a request before robots.txt matters. If it challenges AI agents, your rules file never gets a chance to allow them. This check compares a normal request with requests from AI agents.",
+    good: "AI search and fetch agents receive the same page as a normal visitor.",
+    owner: "developer",
+    asks: {
+      fail: [
+        "Allow the AI search and fetch agents through the firewall, not only in robots.txt.",
+        "In Cloudflare, check the AI bots setting. In Akamai, check Bot Manager. In a custom firewall, allow the named agents.",
+      ],
+      warn: [
+        "Confirm that blocking training crawlers at the firewall is intentional.",
+        "Make sure search and fetch agents still get the full page.",
+      ],
+    },
+  },
+  "content-signal": {
+    title: "A clear AI usage preference",
+    problem: {
+      fail: "Your crawler rules do not state a preference for search, AI input or AI training.",
+      warn: "Your stated AI usage preference conflicts with the crawler rules, so tools may follow the wrong one.",
+    },
+    why: "A content signal is an optional line in robots.txt that states whether content may be used for search, AI answers or training. It makes the policy readable in one place and avoids contradictions with individual crawler rules.",
+    good: "A content signal that agrees with the named crawler rules.",
+    owner: "developer",
+    asks: {
+      warn: [
+        "Make the content signal agree with the crawler rules in robots.txt.",
+        "For example, if search crawlers are allowed, do not set search to no.",
+      ],
+    },
+  },
+  "entity-identity": {
+    title: "A clear identity for your organization or you",
+    problem: {
+      fail: "Your site does not describe who is behind it in a way AI tools can read, so answers about you may not point back here.",
+      warn: "Your site describes who is behind it, but some details or links to other profiles are missing.",
+    },
+    why: "When a site names its organization or author and links to the same identity on other sites, AI tools can connect the facts. That makes answers about you more accurate and more likely to cite this site.",
+    good: "An organization or person description with a name, address, summary and links to at least two other authoritative profiles.",
+    owner: "either",
+    asks: {
+      fail: [
+        "Add an organization or person description to the homepage or About page.",
+        "Include the name, website address, a one-sentence description and links to profiles such as LinkedIn, Wikidata, GitHub or Crunchbase.",
+      ],
+      warn: [
+        "Complete the identity description with any missing name, address, summary or profile links.",
+        "Use at least two links to other sites that describe the same organization or person.",
+      ],
+    },
+  },
+  "faq-content": {
+    title: "Questions and answers on the page",
+    problem: {
+      fail: "The pages people ask about most have no question-and-answer content, so AI tools have no short answers to quote.",
+      warn: "Some question-and-answer content was found, but there is not enough of it to quote reliably.",
+    },
+    why: "Models answer questions by quoting a short answer under a question. A page with three clear questions and one-paragraph answers gives a model something direct to use, instead of making it infer an answer from marketing copy.",
+    good: "Three or more real questions, each followed by a one-paragraph answer in the page text.",
+    owner: "content",
+    asks: {
+      fail: [
+        "Add a short FAQ to the pages people ask about most, with at least three questions.",
+        "Write a direct one-paragraph answer under each question.",
+        "Keep the answers visible on the page, not hidden in a script or a collapsed widget.",
+      ],
+      warn: [
+        "Add a few more questions to the existing FAQ, aiming for at least three.",
+        "Make sure each answer is a full paragraph and appears in the page text.",
+      ],
+    },
+  },
+  "answer-first": {
+    title: "A short answer under the main heading",
+    problem: {
+      fail: "Pages jump straight into sections without a summary, so an AI tool has to piece the answer together.",
+      warn: "The opening paragraph is too short or too long to quote cleanly.",
+    },
+    why: "A summary paragraph directly under the main heading tells a reader, and an AI tool, what the page answers before the detail starts. It is the paragraph most likely to be quoted in an answer.",
+    good: "A 40 to 160 word summary under the main heading, before the first section.",
+    owner: "content",
+    asks: {
+      fail: [
+        "Add one plain-language paragraph of 40 to 160 words directly under the main heading.",
+        "Make it answer the main question of the page, not describe the page.",
+      ],
+      warn: [
+        "Edit the opening paragraph to 40 to 160 words.",
+        "Keep it directly under the main heading and before the first section heading.",
+      ],
+    },
+  },
+  "section-chunks": {
+    title: "Content split into readable sections",
+    problem: {
+      fail: "A long page has no section headings, so an AI tool cannot split it into quotable pieces.",
+      warn: "Some sections are much longer or shorter than a comfortable reading chunk.",
+    },
+    why: "AI tools quote a section at a time. When a page is split under descriptive headings, the right passage is easier to find and quote. Very long sections bury the answer, and very short ones lose context.",
+    good: "Long pages are split under headings, with most sections between 80 and 500 words.",
+    owner: "content",
+    asks: {
+      fail: [
+        "Split the long page under descriptive section headings.",
+        "Aim for sections of 80 to 500 words, each covering one idea.",
+      ],
+      warn: [
+        "Review the longest sections and split any that run past about 500 words.",
+        "Group very short sections under a clearer heading so they keep their context.",
+      ],
+    },
+  },
+  "page-metadata": {
+    title: "A clear page title and summary",
+    problem: {
+      fail: "Some pages are missing a title or a summary, so AI tools have little to describe them with.",
+      warn: "Some page titles or summaries are missing, too short, too long or repeat the site name.",
+    },
+    why: "The page title and summary are the first description an AI tool sees. A specific title and a sentence-long summary help it tell pages apart and choose the right one for an answer.",
+    good: "Every page has a unique title of 15 to 70 characters, a summary of 50 to 160 characters and a language set.",
+    owner: "content",
+    asks: {
+      fail: [
+        "Give every page a unique title and a one-sentence summary.",
+        "Set the page language in the page code.",
+      ],
+      warn: [
+        "Bring page titles to 15 to 70 characters and summaries to 50 to 160 characters.",
+        "Make each title specific to the page instead of repeating the site name.",
+      ],
+    },
+  },
+  "image-alt": {
+    title: "Descriptions for images",
+    problem: {
+      fail: "Many content images have no description, so AI tools cannot tell what they show.",
+      warn: "Some content images have no useful description.",
+    },
+    why: "AI tools cannot see images the way people do. A short description tells them what an image shows and lets them use it accurately. Decorative images can be left undescribed on purpose.",
+    good: "At least nine in ten content images have a short, specific description.",
+    owner: "content",
+    asks: {
+      fail: [
+        "Add a short description to every meaningful image, saying what it shows rather than its file name.",
+        "Mark purely decorative images so they are skipped.",
+      ],
+      warn: ["Review the images without descriptions and add one where the image carries meaning."],
+    },
+  },
+  "citable-evidence": {
+    title: "Numbers and sources that make claims quotable",
+    problem: {
+      fail: "The page makes few concrete claims or links to no sources, so an AI tool has little to cite.",
+      warn: "The page has some evidence, but not enough numbers or sources to stand out as quotable.",
+    },
+    why: "Answers that include a specific number or a source are easier to trust and easier to attribute. Pages with concrete figures and outbound references are more likely to be chosen as the source.",
+    good: "At least two concrete figures per 500 words and at least one link to an outside source.",
+    owner: "content",
+    asks: {
+      warn: [
+        "Add specific numbers, dates or measurements to the main claims.",
+        "Link to the source behind each important figure.",
+      ],
+    },
+  },
+  "schema-depth": {
+    title: "Complete details in your page labels",
+    problem: {
+      fail: "The labels that describe the page are missing most of the details AI tools need.",
+      warn: "The labels that describe the page are missing some key details.",
+    },
+    why: "A label such as Article or Product has expected fields, such as an author or a price. When those fields are missing, an AI tool has to guess or leave the detail out of its answer.",
+    good: "The main label for each page includes every expected field.",
+    owner: "developer",
+    asks: {
+      warn: [
+        "Fill in the missing fields on the main page label, such as author, date, price or address.",
+        "Keep the values in step with the visible page content.",
+      ],
+    },
+  },
+  breadcrumbs: {
+    title: "A trail showing where a page sits",
+    problem: {
+      fail: "Deep pages do not show where they sit in the site, so AI tools cannot place them in context.",
+      warn: "The page trail does not end at the current page, so it may point readers to the wrong place.",
+    },
+    why: "A breadcrumb trail shows the path from the homepage to the current page. AI tools use it to understand hierarchy and to describe a page as part of a larger section.",
+    good: "Deep pages include a trail whose last step is the page itself.",
+    owner: "developer",
+    asks: {
+      warn: [
+        "Add a breadcrumb trail to pages that sit two or more levels deep.",
+        "Make the last step point at the current page address.",
+      ],
+    },
+  },
+  freshness: {
+    title: "A visible last-updated date",
+    problem: {
+      fail: "Pages have no machine-readable date, so AI tools cannot tell whether the content is current.",
+      warn: "The last-updated date is missing, old or out of step with the sitemap.",
+    },
+    why: "AI tools prefer current sources. A machine-readable date on the page, kept close to the sitemap date, tells them the content is maintained and worth quoting.",
+    good: "Every page carries a recent last-updated date, and the sitemap agrees with it.",
+    owner: "developer",
+    asks: {
+      fail: [
+        "Add a last-updated date to each page in the page code.",
+        "Update it when the content changes.",
+      ],
+      warn: [
+        "Refresh the last-updated date when the page changes.",
+        "Keep the page date and the sitemap date within a week of each other.",
+      ],
+    },
+  },
+  canonical: {
+    title: "One authoritative address per page",
+    problem: {
+      fail: "Some pages point at an address outside your site as the official version.",
+      warn: "Some pages do not say which address is the official one, or use a relative address.",
+    },
+    why: "The same page can often be reached at several addresses. Naming one official address prevents AI tools from splitting the page into duplicates or citing the wrong link.",
+    good: "Every page names one absolute address on your own site as the official version.",
+    owner: "developer",
+    asks: {
+      warn: [
+        "Add an official address to each page using an absolute link on our own domain.",
+        "Point it at the page itself, not at a different page.",
       ],
     },
   },

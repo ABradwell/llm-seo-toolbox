@@ -100,6 +100,8 @@ export async function run(argv: string[]): Promise<RunResult> {
     output: merged.output,
     timeout: merged.timeout ?? DEFAULT_OPTIONS.timeout,
     userAgent: merged.userAgent ?? DEFAULT_OPTIONS.userAgent,
+    resolveLinks: merged.resolveLinks ?? true,
+    agentFetch: merged.agentFetch ?? true,
     verbose: merged.verbose ?? false,
     color: merged.color,
   };
@@ -127,6 +129,8 @@ export async function run(argv: string[]): Promise<RunResult> {
       siteType: options.siteType,
       timeoutMs: options.timeout,
       userAgent: options.userAgent,
+      resolveLinks: options.resolveLinks,
+      agentFetch: options.agentFetch,
       cache: false,
     });
     report = buildReport(audit, {

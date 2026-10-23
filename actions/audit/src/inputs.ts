@@ -14,6 +14,8 @@ export interface ActionInputs {
   timeoutMs: number;
   /** `plain` posts plain-language change requests instead of the technical report. */
   reportStyle: ReportStyle;
+  resolveLinks: boolean;
+  agentFetch: boolean;
 }
 
 export class ActionInputError extends Error {
@@ -75,6 +77,9 @@ export function readInputs(env: Record<string, string | undefined> = process.env
     throw new ActionInputError("report-style must be technical or plain.");
   }
 
+  const resolveLinks = parseBoolean(readInput(env, "resolve-links") ?? "true", "resolve-links");
+  const agentFetch = parseBoolean(readInput(env, "agent-fetch") ?? "true", "agent-fetch");
+
   return {
     url,
     minScore,
@@ -84,5 +89,7 @@ export function readInputs(env: Record<string, string | undefined> = process.env
     githubToken,
     timeoutMs,
     reportStyle: reportStyle as ReportStyle,
+    resolveLinks,
+    agentFetch,
   };
 }

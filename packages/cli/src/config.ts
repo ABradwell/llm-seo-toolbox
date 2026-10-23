@@ -28,6 +28,8 @@ export interface ToolboxConfig {
   output?: string;
   timeout?: number;
   userAgent?: string;
+  resolveLinks?: boolean;
+  agentFetch?: boolean;
   verbose?: boolean;
   color?: boolean;
 }
@@ -92,6 +94,10 @@ function normalizeConfig(
     "timeout",
     "userAgent",
     "user-agent",
+    "resolveLinks",
+    "resolve-links",
+    "agentFetch",
+    "agent-fetch",
     "verbose",
     "color",
   ]);
@@ -117,6 +123,8 @@ function normalizeConfig(
 
   config.output = readString(record, "output");
   config.userAgent = readString(record, "userAgent", "user-agent");
+  config.resolveLinks = readBoolean(record, "resolveLinks", "resolve-links");
+  config.agentFetch = readBoolean(record, "agentFetch", "agent-fetch");
   config.verbose = readBoolean(record, "verbose");
   config.color = readBoolean(record, "color");
 
@@ -178,6 +186,8 @@ export function mergeOptions(
     output: pick(cli.output, config.output),
     timeout: pick(cli.timeout, config.timeout),
     userAgent: pick(cli.userAgent, config.userAgent),
+    resolveLinks: pick(cli.resolveLinks, config.resolveLinks),
+    agentFetch: pick(cli.agentFetch, config.agentFetch),
     verbose: pick(cli.verbose, config.verbose),
     color: pick(cli.color, config.color),
   };

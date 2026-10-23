@@ -64,7 +64,7 @@ export function LiveTerminal() {
 
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-code-foreground/10 bg-code-foreground/[0.03] px-3 py-2 font-mono text-[10px] text-code-muted">
         <span>llms.txt · RFC 9309 · schema.org</span>
-        <span className="text-pass-light">20 checks · 8-page sample</span>
+        <span className="text-pass-light">49 checks · 8-page sample</span>
       </div>
     </div>
   );

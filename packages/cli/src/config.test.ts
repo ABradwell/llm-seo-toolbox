@@ -45,6 +45,8 @@ describe("loadConfig", () => {
         "min-grade": "c",
         "site-type": "auto",
         "user-agent": "Custom/1.0",
+        "resolve-links": false,
+        "agent-fetch": false,
       }),
     );
 
@@ -54,6 +56,8 @@ describe("loadConfig", () => {
       minGrade: "C",
       siteType: null,
       userAgent: "Custom/1.0",
+      resolveLinks: false,
+      agentFetch: false,
     });
   });
 
@@ -107,5 +111,11 @@ describe("mergeOptions", () => {
   it("keeps an explicit auto site type", () => {
     const merged = mergeOptions({ siteType: "docs" }, { siteType: null });
     expect(merged.siteType).toBeNull();
+  });
+
+  it("merges the probe toggles", () => {
+    const merged = mergeOptions({ resolveLinks: true, agentFetch: true }, { agentFetch: false });
+    expect(merged.resolveLinks).toBe(true);
+    expect(merged.agentFetch).toBe(false);
   });
 });

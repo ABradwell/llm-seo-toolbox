@@ -13,7 +13,7 @@ import {
   Bot,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 
 import { CopyButton } from "@/components/copy-button";
 import { StatusIcon } from "@/components/status-icon";
@@ -23,6 +23,7 @@ import { ScoreRing } from "@/components/workspace/score-ring";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { downloadText } from "@/lib/download";
+import { crawlerById } from "@/lib/robots";
 import { gradeFor, scoreTone } from "@/lib/score";
 import { cn, formatNumber } from "@/lib/utils";
 import type { AuditCheck, AuditPillar, AuditResult, CheckStatus, PillarId } from "@/types/audit";
@@ -377,9 +378,13 @@ function PillarMatrix({
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--line)]">
-              {checks.map((check) => (
-                <CheckRow key={check.id} check={check} pillarId={pillar.id} origin={origin} />
-              ))}
+              {pillar.id === "access" ? (
+                <AccessRows checks={checks} origin={origin} issuesOnly={issuesOnly} />
+              ) : (
+                checks.map((check) => (
+                  <CheckRow key={check.id} check={check} pillarId={pillar.id} origin={origin} />
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -388,14 +393,89 @@ function PillarMatrix({
   );
 }
 
+const INTENT_BY_CHECK: Record<string, "search" | "fetch" | "training"> = {
+  "access-search": "search",
+  "access-fetch": "fetch",
+  "access-training": "training",
+};
+
+const INTENT_LABELS = {
+  search: "search and citation crawlers",
+  fetch: "on-demand fetch agents",
+  training: "training crawlers",
+} as const;
+
+function AccessRows({
+  checks,
+  origin,
+  issuesOnly,
+}: {
+  checks: AuditCheck[];
+  origin: string;
+  issuesOnly: boolean;
+}) {
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const bots = checks.filter((check) => check.id.startsWith("bot-"));
+  const main = checks.filter((check) => !check.id.startsWith("bot-"));
+
+  return (
+    <>
+      {main.map((check) => {
+        const intent = INTENT_BY_CHECK[check.id];
+        if (!intent) {
+          return <CheckRow key={check.id} check={check} pillarId="access" origin={origin} />;
+        }
+
+        const children = bots
+          .filter((bot) => crawlerById(bot.id.slice(4))?.intent === intent)
+          .filter((bot) => !issuesOnly || bot.status === "fail" || bot.status === "warn");
+        const open = expanded[intent] ?? false;
+
+        return (
+          <Fragment key={check.id}>
+            <CheckRow check={check} pillarId="access" origin={origin} />
+            {children.length > 0 ? (
+              <tr className="bg-panel-2/20">
+                <td colSpan={6} className="px-4 py-1.5">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExpanded((current) => ({ ...current, [intent]: !current[intent] }))
+                    }
+                    aria-expanded={open}
+                    className="inline-flex items-center gap-1.5 font-mono text-[10px] text-muted transition-colors hover:text-accent-strong"
+                  >
+                    <ChevronDown
+                      className={cn("size-3 transition-transform", open && "rotate-180")}
+                      aria-hidden="true"
+                    />
+                    {open ? "Hide" : "Show"} {children.length} {INTENT_LABELS[intent]} checks
+                  </button>
+                </td>
+              </tr>
+            ) : null}
+            {open
+              ? children.map((bot) => (
+                  <CheckRow key={bot.id} check={bot} pillarId="access" origin={origin} indent />
+                ))
+              : null}
+          </Fragment>
+        );
+      })}
+    </>
+  );
+}
+
 function CheckRow({
   check,
   pillarId,
   origin,
+  indent = false,
 }: {
   check: AuditCheck;
   pillarId: PillarId;
   origin: string;
+  indent?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const detailId = `detail-${pillarId}-${check.id}`;
@@ -414,7 +494,7 @@ function CheckRow({
             </span>
           </span>
         </td>
-        <td className="px-3 py-2.5">
+        <td className={cn("px-3 py-2.5", indent && "pl-8")}>
           <span className="text-xs font-medium">{check.label}</span>
         </td>
         <td className="px-3 py-2.5">

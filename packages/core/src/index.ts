@@ -34,6 +34,7 @@ export type {
   ResolvedPlainCopy,
 } from "./plain-language";
 export {
+  accessIntentLine,
   buildReport,
   evaluateThresholds,
   gradeRank,
@@ -43,6 +44,7 @@ export {
   statusForScore,
 } from "./report";
 export type {
+  AccessIntentSummary,
   AuditReport,
   AuditReportCheck,
   AuditReportPillar,

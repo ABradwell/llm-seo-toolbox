@@ -18,6 +18,10 @@ export interface CliOptions {
   output?: string;
   timeout?: number;
   userAgent?: string;
+  /** Resolve links inside llms.txt. Defaults to true. */
+  resolveLinks?: boolean;
+  /** Compare a live fetch as GPTBot and OAI-SearchBot. Defaults to true. */
+  agentFetch?: boolean;
   verbose?: boolean;
   color?: boolean;
 }
@@ -155,6 +159,14 @@ export function parseArgs(argv: string[]): ParsedArgs {
         options.color = true;
         index += 1;
         break;
+      case "--no-resolve-links":
+        options.resolveLinks = false;
+        index += 1;
+        break;
+      case "--no-agent-fetch":
+        options.agentFetch = false;
+        index += 1;
+        break;
       case "-f":
       case "--format": {
         const { value, next } = readValue(argv, index, flag);
@@ -250,6 +262,8 @@ Options
   -o, --output <file>     Write the report to a file instead of stdout
       --timeout <ms>      Per-request timeout (default: 10000)
       --user-agent <ua>   Override the crawler user agent
+      --no-resolve-links  Skip HEAD requests that verify llms.txt links
+      --no-agent-fetch    Skip the live GPTBot and OAI-SearchBot comparison
   -v, --verbose           Log progress and timing to stderr
       --no-color          Disable ANSI colour
       --version           Print the version

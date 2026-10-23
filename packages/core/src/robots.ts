@@ -1,3 +1,8 @@
+import { AI_CRAWLERS } from "./crawlers";
+
+export { AI_CRAWLERS, crawlerById, crawlersByIntent } from "./crawlers";
+export type { AiCrawler } from "./types";
+
 export interface RobotsRule {
   type: "allow" | "disallow";
   path: string;
@@ -12,6 +17,14 @@ export interface RobotsGroup {
   line: number;
 }
 
+export interface ContentSignal {
+  /** 1-based line of the Content-Signal directive. */
+  line: number;
+  search: string | null;
+  aiInput: string | null;
+  aiTrain: string | null;
+}
+
 export interface RobotsData {
   exists: boolean;
   groups: RobotsGroup[];
@@ -19,45 +32,33 @@ export interface RobotsData {
   /** 1-based lines of the Sitemap: directives, parallel to `sitemaps`. */
   sitemapLines: number[];
   crawlDelay: number | null;
+  /** Cloudflare Content-Signal directives, parsed into their three purposes. */
+  contentSignals: ContentSignal[];
 }
 
-export const AI_CRAWLERS = [
-  {
-    id: "gptbot",
-    label: "GPTBot",
-    vendor: "OpenAI",
-    note: "Trains and refreshes OpenAI models.",
-  },
-  {
-    id: "claudebot",
-    label: "ClaudeBot",
-    vendor: "Anthropic",
-    note: "Collects content for Claude.",
-  },
-  {
-    id: "google-extended",
-    label: "Google-Extended",
-    vendor: "Google",
-    note: "Controls Gemini and Vertex AI grounding.",
-  },
-  {
-    id: "perplexitybot",
-    label: "PerplexityBot",
-    vendor: "Perplexity",
-    note: "Powers Perplexity answers and citations.",
-  },
-  {
-    id: "bytespider",
-    label: "Bytespider",
-    vendor: "ByteDance",
-    note: "Feeds ByteDance and TikTok search.",
-  },
-] as const;
-
-export type AiCrawler = (typeof AI_CRAWLERS)[number];
-
 export function emptyRobots(): RobotsData {
-  return { exists: false, groups: [], sitemaps: [], sitemapLines: [], crawlDelay: null };
+  return {
+    exists: false,
+    groups: [],
+    sitemaps: [],
+    sitemapLines: [],
+    crawlDelay: null,
+    contentSignals: [],
+  };
+}
+
+function parseContentSignal(value: string, line: number): ContentSignal {
+  const signal: ContentSignal = { line, search: null, aiInput: null, aiTrain: null };
+  for (const part of value.split(/[;,]/)) {
+    const [rawKey, rawValue] = part.split("=");
+    if (!rawKey || rawValue === undefined) continue;
+    const key = rawKey.trim().toLowerCase();
+    const entry = rawValue.trim().toLowerCase();
+    if (key === "search") signal.search = entry;
+    else if (key === "ai-input") signal.aiInput = entry;
+    else if (key === "ai-train") signal.aiTrain = entry;
+  }
+  return signal;
 }
 
 export function parseRobots(text: string): RobotsData {
@@ -65,6 +66,7 @@ export function parseRobots(text: string): RobotsData {
   const sitemaps: string[] = [];
   const sitemapLines: number[] = [];
   let crawlDelay: number | null = null;
+  const contentSignals: ContentSignal[] = [];
   let agents: string[] = [];
   let rules: RobotsRule[] = [];
   let groupLine = 1;
@@ -109,6 +111,11 @@ export function parseRobots(text: string): RobotsData {
       continue;
     }
 
+    if (field === "content-signal" && value) {
+      contentSignals.push(parseContentSignal(value, lineNumber));
+      continue;
+    }
+
     if (field === "crawl-delay" && value) {
       const parsed = Number.parseFloat(value);
       if (Number.isFinite(parsed)) crawlDelay = parsed;
@@ -117,7 +124,7 @@ export function parseRobots(text: string): RobotsData {
 
   pushGroup();
 
-  return { exists: true, groups, sitemaps, sitemapLines, crawlDelay };
+  return { exists: true, groups, sitemaps, sitemapLines, crawlDelay, contentSignals };
 }
 
 function escapeRegExp(value: string): string {
@@ -264,4 +271,66 @@ export function isPathBlocked(data: RobotsData, path = "/"): boolean {
   const groups = data.groups.filter((group) => group.agents.includes("*"));
   if (groups.length === 0) return false;
   return !evaluatePath(groups, path).allowed;
+}
+
+export interface CrawlerPathAccess {
+  path: string;
+  allowed: boolean;
+  line: number | null;
+}
+
+export interface CrawlerPathVerdict extends CrawlerAccess {
+  paths: CrawlerPathAccess[];
+  blockedPaths: string[];
+  /** Allowed path count, useful for the "8/8 sampled paths" summary. */
+  allowedCount: number;
+}
+
+/**
+ * Evaluates one crawler against the root and every sampled page path. The
+ * worst outcome wins, so a site that allows `/` and disallows `/docs/` no
+ * longer passes a named crawler check.
+ */
+export function crawlerAccessOnPaths(
+  data: RobotsData,
+  bot: string,
+  paths: readonly string[],
+): CrawlerPathVerdict {
+  const unique = [...new Set(paths.length > 0 ? paths : ["/"])];
+  const results = unique.map((path) => {
+    const access = crawlerAccess(data, bot, path);
+    return { path, allowed: access.status === "pass", line: access.line };
+  });
+  const blockedPaths = results.filter((entry) => !entry.allowed).map((entry) => entry.path);
+  const base = crawlerAccess(data, bot, unique[0]);
+  const allowedCount = results.length - blockedPaths.length;
+
+  if (blockedPaths.length === 0) {
+    return {
+      ...base,
+      status: "pass",
+      summary:
+        base.scope === "missing" || base.scope === "none"
+          ? `Allowed · ${allowedCount}/${results.length} sampled paths`
+          : `Allowed · ${allowedCount}/${results.length} sampled paths`,
+      detail:
+        base.scope === "specific"
+          ? `A rule targeting this crawler allows all ${results.length} sampled paths.`
+          : `No crawler-specific block applies, and all ${results.length} sampled paths are allowed.`,
+      paths: results,
+      blockedPaths,
+      allowedCount,
+    };
+  }
+
+  return {
+    ...base,
+    status: "fail",
+    line: results.find((entry) => !entry.allowed)?.line ?? base.line,
+    summary: `Blocked · ${blockedPaths.length}/${results.length} paths`,
+    detail: `Blocked on ${blockedPaths.join(", ")}. The worst path decides this check, even when the root is allowed.`,
+    paths: results,
+    blockedPaths,
+    allowedCount,
+  };
 }

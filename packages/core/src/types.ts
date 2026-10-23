@@ -8,6 +8,50 @@ export type CheckScope = "site" | "page";
 
 export type SamplingMethod = "sitemap" | "links" | "homepage" | "page";
 
+/** What a crawler does with the content it fetches. */
+export type CrawlerIntent = "training" | "search" | "fetch";
+
+export interface AiCrawler {
+  id: string;
+  label: string;
+  vendor: string;
+  intent: CrawlerIntent;
+  note: string;
+}
+
+export type StructuredDataFormat = "json-ld" | "microdata" | "rdfa";
+
+export interface FreshnessSignal {
+  source: "json-ld" | "meta" | "time" | "sitemap" | "header";
+  property: string;
+  iso: string;
+  line: number | null;
+}
+
+export interface AgentFetchComparison {
+  userAgent: string;
+  status: number;
+  /** True when the AI user agent received a different status or a body under 20% of the default size. */
+  blocked: boolean;
+  challenge: "cloudflare" | "akamai" | "generic" | null;
+  bytes: number;
+  finalUrl: string;
+  detail: string;
+}
+
+/** Summary of a Person or Organization node found in a page's structured data. */
+export interface IdentitySignal {
+  type: string;
+  format: StructuredDataFormat;
+  name: string | null;
+  url: string | null;
+  description: string | null;
+  sameAs: string[];
+  jobTitle: string | null;
+  knowsAbout: string[];
+  line: number | null;
+}
+
 export type PageOutcome = "analyzed" | "unreachable" | "not-html" | "off-origin";
 
 /**
@@ -64,7 +108,9 @@ export interface SiteClassification {
   /** What the profile changes inside the audit. */
   compatibility: {
     openApiScored: boolean;
+    requiredSchema: string[];
     recommendedSchema: string[];
+    faqExpected: boolean;
     note: string;
   };
 }
@@ -179,8 +225,21 @@ export interface PageAuditResult {
   h1Count: number;
   headingCount: number;
   jsonLdTypes: string[];
+  structuredFormats: StructuredDataFormat[];
   metaRobots: string;
   xRobotsTag: string | null;
+  /** Freshest machine-readable date on the page, when one exists. */
+  freshness: FreshnessSignal | null;
+  /** Number of visible question-and-answer pairs found in the content. */
+  faqPairs: number;
+  /** True when the page carries a FAQPage node with a mainEntity list. */
+  hasFaqSchema: boolean;
+  /** Person and Organization nodes found on the page. */
+  identity: IdentitySignal[];
+  /** Visible meta description length, in characters. */
+  descriptionChars: number;
+  /** Absolute canonical URL declared by the page, when one exists. */
+  canonical: string | null;
   error?: string;
   fetchMs: number;
 }
@@ -271,7 +330,7 @@ export interface AuditMeta {
   cached: boolean;
   siteCached: boolean;
   focusCached: boolean;
-  scoringVersion: "site-1";
+  scoringVersion: "site-2";
 }
 
 export interface AuditResult {
@@ -298,6 +357,10 @@ export interface AuditResult {
   files: DiscoveryFile[];
   vision: VisionPayload;
   fixes: AuditFix[];
+  /** Freshest machine-readable date found on the homepage. */
+  freshness: FreshnessSignal | null;
+  /** AI user-agent fetches compared with the default fetch. */
+  agentFetch: AgentFetchComparison[];
   meta: AuditMeta;
 }
 

@@ -24,6 +24,13 @@ export interface FetchTextOutcome {
   unsafe: boolean;
 }
 
+export interface HeadOutcome {
+  ok: boolean;
+  status: number;
+  finalUrl: string;
+  error: string | null;
+}
+
 const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308]);
 
 function failure(url: string, error: string, options?: { status?: number; unsafe?: boolean }) {
@@ -177,4 +184,86 @@ export async function fetchText(
   }
 
   return failure(current.toString(), "Too many redirects (limit: 5).");
+}
+
+/** A HEAD request with the same SSRF-safe redirect handling as fetchText. */
+export async function headUrl(
+  input: string | URL,
+  options: { timeoutMs?: number; userAgent?: string } = {},
+): Promise<HeadOutcome> {
+  let current: URL;
+
+  try {
+    current = await assertSafeUrl(input);
+  } catch (error) {
+    return {
+      ok: false,
+      status: 0,
+      finalUrl: String(input),
+      error: error instanceof Error ? error.message : "The URL could not be validated.",
+    };
+  }
+
+  const timeoutMs = options.timeoutMs ?? 3_000;
+
+  for (let hop = 0; hop < 5; hop += 1) {
+    let response: Response;
+    try {
+      response = await fetch(current, {
+        method: "HEAD",
+        redirect: "manual",
+        cache: "no-store",
+        signal: AbortSignal.timeout(timeoutMs),
+        headers: {
+          "user-agent": options.userAgent ?? AUDIT_USER_AGENT,
+          accept: "*/*",
+        },
+      });
+    } catch (error) {
+      const name = error instanceof Error ? error.name : "";
+      return {
+        ok: false,
+        status: 0,
+        finalUrl: current.toString(),
+        error: name === "TimeoutError" ? "The request timed out." : "The request failed.",
+      };
+    }
+
+    if (REDIRECT_STATUS.has(response.status)) {
+      const location = response.headers.get("location");
+      if (!location) {
+        return {
+          ok: false,
+          status: response.status,
+          finalUrl: current.toString(),
+          error: "The server returned a redirect without a location.",
+        };
+      }
+      try {
+        current = await assertSafeUrl(new URL(location, current));
+      } catch (error) {
+        return {
+          ok: false,
+          status: response.status,
+          finalUrl: current.toString(),
+          error: error instanceof Error ? error.message : "Unsafe redirect target.",
+        };
+      }
+      continue;
+    }
+
+    return {
+      ok: response.ok,
+      status: response.status,
+      finalUrl: current.toString(),
+      error: response.ok ? null : `The link returned HTTP ${response.status}.`,
+    };
+  }
+
+  return {
+    ok: false,
+    status: 0,
+    finalUrl: current.toString(),
+    error: "Too many redirects (limit: 5).",
+  };
 }

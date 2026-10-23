@@ -53,6 +53,12 @@ describe("parseArgs", () => {
     );
   });
 
+  it("can skip llms.txt link resolution and the live agent fetch", () => {
+    const parsed = parseArgs(["example.com", "--no-resolve-links", "--no-agent-fetch"]);
+    expect(parsed.options?.resolveLinks).toBe(false);
+    expect(parsed.options?.agentFetch).toBe(false);
+  });
+
   it("reads help and version without requiring a URL", () => {
     expect(parseArgs(["--help"])).toMatchObject({ help: true, options: null });
     expect(parseArgs(["--version"])).toMatchObject({ version: true, options: null });

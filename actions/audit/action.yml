@@ -37,6 +37,14 @@ inputs:
     description: "Pull request report style: technical (full check matrix) or plain (plain-language change requests for non-technical readers)"
     required: false
     default: "technical"
+  resolve-links:
+    description: "Verify llms.txt links with HEAD requests (at most six, under a four-second budget)"
+    required: false
+    default: "true"
+  agent-fetch:
+    description: "Compare a live fetch as GPTBot and OAI-SearchBot to expose firewall blocks"
+    required: false
+    default: "true"
 
 outputs:
   score:
