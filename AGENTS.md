@@ -8,6 +8,19 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 <!-- END:nextjs-agent-rules -->
 
+## Git identity and credentials
+
+This is a personal repository owned by `ABradwell`. Every commit, push and pull request must use the ABradwell identity, never a work account such as `aiden-zally` or `aiden@zally.com`.
+
+- Commit as `Aiden Stevenson Bradwell <Aidenbradwell@gmail.com>`. The repository's local `.git/config` already sets this. Confirm with `git config user.email` before committing, and do not override it with `-c user.email=...`, `--author` or environment variables.
+- Push and open pull requests as the `ABradwell` GitHub account. Git authenticates through `gh`, and the active `gh` account on this machine may be a work account. Do not run `gh auth switch`. Override the token for each command instead:
+  ```bash
+  GH_TOKEN="$(gh auth token --hostname github.com --user ABradwell)" git push -u origin <branch>
+  GH_TOKEN="$(gh auth token --hostname github.com --user ABradwell)" gh pr create --base main --fill
+  ```
+  Use the same prefix for every `gh` command that writes to GitHub, such as `gh pr edit` and `gh pr comment`.
+- If the ABradwell credentials are missing or a push is rejected, stop and ask the user. Do not fall back to another account.
+
 ## Branch and pull request workflow
 
 Never commit directly to `main`. Every change goes through a branch and a pull request:
