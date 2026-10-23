@@ -23,6 +23,7 @@ import {
 } from "./args";
 import { createPalette, shouldUseColor, type Palette } from "./color";
 import { loadConfig, mergeOptions } from "./config";
+import { renderBrief } from "./formatters/brief";
 import { renderJson } from "./formatters/json";
 import { renderMarkdown } from "./formatters/markdown";
 import { renderSummary } from "./formatters/summary";
@@ -58,6 +59,8 @@ function render(report: AuditReport, format: OutputFormat, palette: Palette): st
       return renderJson(report);
     case "markdown":
       return renderMarkdown(report);
+    case "brief":
+      return renderBrief(report);
     case "summary":
       return renderSummary(report, palette);
     case "table":

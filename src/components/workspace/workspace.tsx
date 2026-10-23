@@ -8,12 +8,13 @@ import {
   Gauge,
   Github,
   Layers,
+  ListChecks,
   RefreshCw,
   Terminal,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Logo } from "@/components/logo";
 import { QuickAuditBar } from "@/components/landing/quick-audit-bar";
@@ -21,6 +22,7 @@ import { AuditMatrix } from "@/components/workspace/audit-matrix";
 import { LlmsTxtEditor } from "@/components/workspace/llms-txt-editor";
 import { PageResultsTable } from "@/components/workspace/page-results-table";
 import { PipelineLoader } from "@/components/workspace/pipeline-loader";
+import { PlainReport } from "@/components/workspace/plain-report";
 import { ScraperSimulator } from "@/components/workspace/scraper-simulator";
 import {
   SiteClassificationPanel,
@@ -28,6 +30,7 @@ import {
 } from "@/components/workspace/site-classification-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { stepForError } from "@/lib/pipeline-steps";
 import { SAMPLE_TARGETS } from "@/lib/samples";
@@ -36,6 +39,7 @@ import { isSiteType } from "@/lib/site-types";
 import { scoreTone } from "@/lib/score";
 import { prettyDomain } from "@/lib/url";
 import { formatNumber } from "@/lib/utils";
+import { applyView, parseView, type ViewMode } from "@/lib/view-mode";
 import type { AuditApiError, AuditResult, AuditScope } from "@/types/audit";
 
 interface WorkspaceError {
@@ -59,6 +63,9 @@ export function Workspace() {
   const rawType = searchParams.get("type") ?? "";
   const override = isSiteType(rawType) ? rawType : null;
   const scope: AuditScope = searchParams.get("scope") === "page" ? "page" : "site";
+  const view = parseView(searchParams.get("view"));
+  // Element to scroll to once the technical view has rendered.
+  const pendingAnchor = useRef<string | null>(null);
 
   const [refreshToken, setRefreshToken] = useState(0);
   // The URL whose report the pipeline loader has handed off to. Refreshes and
@@ -163,6 +170,26 @@ export function Workspace() {
     [pathname, rawUrl, router, scope, searchParams],
   );
 
+  const selectView = useCallback(
+    (next: ViewMode, anchorId?: string) => {
+      pendingAnchor.current = anchorId ?? null;
+      if (next === view) return;
+      const params = applyView(new URLSearchParams(searchParams.toString()), next);
+      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    },
+    [pathname, router, searchParams, view],
+  );
+
+  useEffect(() => {
+    const anchorId = pendingAnchor.current;
+    if (view !== "technical" || !anchorId) return;
+    pendingAnchor.current = null;
+    const frame = requestAnimationFrame(() => {
+      document.getElementById(anchorId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [view]);
+
   return (
     <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-50 border-b border-line bg-background/92 backdrop-blur-md">
@@ -244,29 +271,29 @@ export function Workspace() {
                 <p className="mt-1 line-clamp-1 text-xs text-muted">{audit.profile.title}</p>
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <span className="font-mono text-[9px] tracking-[0.14em] text-muted uppercase">
+                    view
+                  </span>
+                  <SegmentedControl
+                    label="Report detail"
+                    value={view}
+                    onChange={(next) => selectView(next)}
+                    options={[
+                      { value: "plain", label: "plain language" },
+                      { value: "technical", label: "technical" },
+                    ]}
+                  />
+                  <span className="font-mono text-[9px] tracking-[0.14em] text-muted uppercase">
                     scope
                   </span>
-                  <div
-                    role="group"
-                    aria-label="Audit scope"
-                    className="flex items-center gap-0.5 rounded-[3px] border border-line bg-panel p-0.5"
-                  >
-                    {(["site", "page"] as const).map((value) => (
-                      <button
-                        key={value}
-                        type="button"
-                        onClick={() => selectScope(value)}
-                        aria-pressed={scope === value}
-                        className={
-                          scope === value
-                            ? "rounded-[2px] bg-ink px-2 py-1 font-mono text-[9px] tracking-[0.08em] text-parchment uppercase"
-                            : "rounded-[2px] px-2 py-1 font-mono text-[9px] tracking-[0.08em] text-muted uppercase transition-colors hover:text-foreground"
-                        }
-                      >
-                        {value}
-                      </button>
-                    ))}
-                  </div>
+                  <SegmentedControl
+                    label="Audit scope"
+                    value={scope}
+                    onChange={selectScope}
+                    options={[
+                      { value: "site", label: "site" },
+                      { value: "page", label: "page" },
+                    ]}
+                  />
                   <span className="font-mono text-[9px] text-muted/60">
                     {audit.scope === "site"
                       ? `${audit.coverage.analyzedPages}/${audit.coverage.sampleSize} sampled`
@@ -300,8 +327,12 @@ export function Workspace() {
             <Tabs defaultValue="audit" className="space-y-4">
               <TabsList>
                 <TabsTrigger value="audit">
-                  <Gauge aria-hidden="true" />
-                  Audit matrix
+                  {view === "plain" ? (
+                    <ListChecks aria-hidden="true" />
+                  ) : (
+                    <Gauge aria-hidden="true" />
+                  )}
+                  {view === "plain" ? "What to fix" : "Audit matrix"}
                 </TabsTrigger>
                 <TabsTrigger value="pages">
                   <Layers aria-hidden="true" />
@@ -318,7 +349,16 @@ export function Workspace() {
               </TabsList>
 
               <TabsContent value="audit">
-                <AuditMatrix audit={audit} onRefresh={refresh} refreshing={loading} />
+                {view === "plain" ? (
+                  <PlainReport
+                    audit={audit}
+                    onRefresh={refresh}
+                    refreshing={loading}
+                    onShowTechnical={(anchorId) => selectView("technical", anchorId)}
+                  />
+                ) : (
+                  <AuditMatrix audit={audit} onRefresh={refresh} refreshing={loading} />
+                )}
               </TabsContent>
 
               <TabsContent value="pages">

@@ -1,6 +1,9 @@
 import { isAuditGrade, isSiteType } from "@llm-seo-toolbox/core";
 import type { AuditGrade, SiteType } from "@llm-seo-toolbox/core/types";
 
+export const REPORT_STYLES = ["technical", "plain"] as const;
+export type ReportStyle = (typeof REPORT_STYLES)[number];
+
 export interface ActionInputs {
   url: string;
   minScore: number;
@@ -9,6 +12,8 @@ export interface ActionInputs {
   commentOnPr: boolean;
   githubToken: string | null;
   timeoutMs: number;
+  /** `plain` posts plain-language change requests instead of the technical report. */
+  reportStyle: ReportStyle;
 }
 
 export class ActionInputError extends Error {
@@ -65,5 +70,19 @@ export function readInputs(env: Record<string, string | undefined> = process.env
   const timeoutMs = parseInteger(readInput(env, "timeout") ?? "10000", "timeout", 1000, 120000);
   const githubToken = readInput(env, "github-token") || null;
 
-  return { url, minScore, minGrade, siteType, commentOnPr, githubToken, timeoutMs };
+  const reportStyle = (readInput(env, "report-style") || "technical").toLowerCase();
+  if (!(REPORT_STYLES as readonly string[]).includes(reportStyle)) {
+    throw new ActionInputError("report-style must be technical or plain.");
+  }
+
+  return {
+    url,
+    minScore,
+    minGrade,
+    siteType,
+    commentOnPr,
+    githubToken,
+    timeoutMs,
+    reportStyle: reportStyle as ReportStyle,
+  };
 }

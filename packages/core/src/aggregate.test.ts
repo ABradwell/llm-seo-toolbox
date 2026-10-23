@@ -23,6 +23,7 @@ function check(id: string, status: AuditCheck["status"]): AuditCheck {
     summary: "",
     detail: `${id} detail`,
     protocol: "test",
+    recommendation: status === "pass" ? undefined : `Fix ${id}.`,
     weight: 1,
     scope: "page",
   };
@@ -72,6 +73,14 @@ describe("aggregatePageChecks", () => {
       affected: ["https://example.com/page-8"],
     });
     expect(h1.scope).toBe("page");
+  });
+
+  it("takes the recommendation from a failing page when the first page passes", () => {
+    const pages = [page("https://example.com/a", "pass"), page("https://example.com/b", "fail")];
+    const h1 = aggregatePageChecks(pages).parseability.find((entry) => entry.id === "h1")!;
+
+    expect(h1.status).toBe("warn");
+    expect(h1.recommendation).toBe("Fix h1.");
   });
 
   it("keeps a single warning from turning the aggregate into a binary warning", () => {

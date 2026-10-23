@@ -9,6 +9,7 @@ import {
 import { pullRequestContext, upsertPullRequestComment } from "./comment";
 import { ActionInputError, readInputs, type ActionInputs } from "./inputs";
 import { setOutput, writeStepSummary } from "./outputs";
+import { renderPlainComment } from "./plain";
 
 const MARKER = "llm-seo-toolbox-audit-report";
 const USER_AGENT =
@@ -99,11 +100,14 @@ async function audit(inputs: ActionInputs): Promise<void> {
 
   logReport(report);
 
-  const markdown = renderMarkdownReport(report, {
-    marker: MARKER,
-    title: "LLM SEO Toolbox audit",
-    runUrl: runUrl(),
-  });
+  const markdown =
+    inputs.reportStyle === "plain"
+      ? renderPlainComment(report, { marker: MARKER, runUrl: runUrl() })
+      : renderMarkdownReport(report, {
+          marker: MARKER,
+          title: "LLM SEO Toolbox audit",
+          runUrl: runUrl(),
+        });
   writeStepSummary(summaryMarkdown(markdown));
 
   setOutput("score", String(report.score));

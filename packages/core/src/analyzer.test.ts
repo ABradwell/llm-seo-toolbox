@@ -122,6 +122,7 @@ ${paths.map((path) => `  <url><loc>${origin}${path}</loc></url>`).join("\n")}
 });
 
 import { analyzeSite, clearAuditCache } from "./analyzer";
+import { PAGE_CHECK_IDS, SITE_CHECK_IDS } from "./plain-language";
 
 describe("analyzeSite site scope", () => {
   beforeEach(() => {
@@ -174,5 +175,18 @@ describe("analyzeSite site scope", () => {
     expect(page.focusPage.url).toBe("https://example.com/docs/app");
     expect(page.coverage.method).toBe("page");
     expect(page.coverage.sampleSize).toBe(1);
+  });
+
+  it("only emits check ids that have plain-language copy", async () => {
+    const known = new Set([...SITE_CHECK_IDS, ...PAGE_CHECK_IDS]);
+    for (const scope of ["site", "page"] as const) {
+      const result = await analyzeSite("https://example.com/", { scope });
+      const ids = result.pillars.flatMap((pillar) => pillar.checks.map((entry) => entry.id));
+      expect(
+        ids.filter((id) => !known.has(id)),
+        scope,
+      ).toEqual([]);
+      expect(new Set(ids).size, scope).toBe(known.size);
+    }
   });
 });
