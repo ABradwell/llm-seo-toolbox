@@ -4,6 +4,7 @@ import { buildReport } from "@llm-seo-toolbox/core";
 import { auditFixture } from "@llm-seo-toolbox/core/fixtures";
 
 import { createPalette } from "../color";
+import { renderBrief } from "./brief";
 import { renderJson } from "./json";
 import { renderSummary } from "./summary";
 import { renderTable } from "./table";
@@ -45,5 +46,17 @@ describe("renderJson", () => {
     };
     expect(parsed.score).toBe(63);
     expect(parsed.thresholds.passed).toBe(false);
+  });
+});
+
+describe("renderBrief", () => {
+  it("prints plain-language change requests with technical references", () => {
+    const output = renderBrief(report);
+    expect(output).toContain("# Change requests for example.com");
+    expect(output).toContain("## Must fix (1)");
+    expect(output).toContain("### 1. A clear main heading on each page");
+    expect(output).toContain("What we need:");
+    expect(output).toContain("Technical reference: `h1`");
+    expect(output).not.toContain("\u001b[");
   });
 });

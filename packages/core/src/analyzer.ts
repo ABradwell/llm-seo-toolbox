@@ -45,7 +45,7 @@ import {
   selectSample,
   SITE_SAMPLE_SIZE,
 } from "./sampling";
-import { gradeFor, scoreAudit, scorePillar } from "./score";
+import { compareFixPriority, gradeFor, scoreAudit, scorePillar } from "./score";
 import { assertSafeUrl, UnsafeUrlError } from "./security";
 import { looksLikeHtml, parseSitemap } from "./sitemap";
 import { pathLabel, prettyDomain } from "./url";
@@ -1244,11 +1244,7 @@ function buildFixes(pillars: AuditPillar[]): AuditFix[] {
           sample: entry.sample,
         })),
     )
-    .sort((a, b) => {
-      const rank = (status: CheckStatus) => (status === "fail" ? 0 : status === "warn" ? 1 : 2);
-      if (rank(a.status) !== rank(b.status)) return rank(a.status) - rank(b.status);
-      return b.weight - a.weight;
-    })
+    .sort(compareFixPriority)
     .slice(0, 8);
 }
 

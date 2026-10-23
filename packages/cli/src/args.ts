@@ -4,7 +4,7 @@ import type { AuditGrade, SiteType } from "@llm-seo-toolbox/core/types";
 export const CLI_NAME = "llm-seo-toolbox";
 export const CLI_VERSION = "0.1.0";
 
-export const OUTPUT_FORMATS = ["table", "json", "markdown", "summary"] as const;
+export const OUTPUT_FORMATS = ["table", "json", "markdown", "summary", "brief"] as const;
 export type OutputFormat = (typeof OUTPUT_FORMATS)[number];
 
 export interface CliOptions {
@@ -240,7 +240,8 @@ Usage
   ${CLI_NAME} <url> [options]
 
 Options
-  -f, --format <type>     table (default), json, markdown or summary
+  -f, --format <type>     table (default), json, markdown, summary or brief
+                          (plain-language change requests for a developer)
   -s, --min-score <0-100> Minimum composite score required to pass
   -g, --min-grade <A-F>   Minimum letter grade required to pass
   -t, --site-type <type>  auto (default), saas, portfolio, docs, ecommerce,
@@ -263,5 +264,6 @@ Examples
   ${CLI_NAME} example.com
   ${CLI_NAME} https://example.com --format json --min-score 75 --min-grade B
   ${CLI_NAME} docs.example.com --format markdown --output audit.md
+  ${CLI_NAME} example.com --format brief --output change-requests.md
 `;
 }

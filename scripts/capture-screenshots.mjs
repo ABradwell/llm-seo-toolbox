@@ -16,7 +16,7 @@
  *   fullPage, scrollTo, waitForText, waitForSelector, settleMs, timeoutMs.
  *
  * Default jobs capture the landing page and pipeline at 1440x900 and 390x844,
- * then the workspace with automatic classification and with a portfolio override.
+ * then the workspace in the plain-language and technical views and with a portfolio override.
  * Screenshots are saved outside the repository by default.
  */
 import { spawn } from "node:child_process";
@@ -126,7 +126,7 @@ function defaultJobs({ auditUrl, scale }) {
       height: 900,
       deviceScaleFactor: scale,
       settleMs: 3000,
-      waitForText: "site classification",
+      waitForText: "change requests",
     },
     {
       name: "workspace-mobile",
@@ -136,7 +136,26 @@ function defaultJobs({ auditUrl, scale }) {
       mobile: true,
       deviceScaleFactor: scale,
       settleMs: 3000,
-      waitForText: "site classification",
+      waitForText: "change requests",
+    },
+    {
+      name: "workspace-desktop-technical",
+      path: `${workspace}&view=technical`,
+      width: 1440,
+      height: 900,
+      deviceScaleFactor: scale,
+      settleMs: 3000,
+      waitForText: "audit matrix",
+    },
+    {
+      name: "workspace-mobile-technical",
+      path: `${workspace}&view=technical`,
+      width: 390,
+      height: 844,
+      mobile: true,
+      deviceScaleFactor: scale,
+      settleMs: 3000,
+      waitForText: "audit matrix",
     },
     {
       name: "workspace-desktop-override",

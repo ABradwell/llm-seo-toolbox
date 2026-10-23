@@ -51,6 +51,24 @@ describe("statusForScore", () => {
 });
 
 describe("buildReport", () => {
+  it("passes check scope and page samples through", () => {
+    const result = auditFixture();
+    const sample = {
+      total: 4,
+      passed: 3,
+      warned: 0,
+      failed: 1,
+      affected: ["https://example.com/a"],
+    };
+    result.pillars[2].checks[0] = { ...result.pillars[2].checks[0], scope: "page", sample };
+    const report = buildReport(result);
+    const h1 = report.checks.find((entry) => entry.id === "h1");
+
+    expect(h1?.scope).toBe("page");
+    expect(h1?.sample).toEqual(sample);
+    expect(report.checks[0]).not.toHaveProperty("sample");
+  });
+
   it("flattens pillars and checks without inventing fields", () => {
     const report = buildReport(auditFixture());
     expect(report.pillars.discovery.score).toBe(100);

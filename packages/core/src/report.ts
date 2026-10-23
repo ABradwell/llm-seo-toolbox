@@ -48,6 +48,10 @@ export interface AuditReportCheck {
   protocol?: string;
   evidence?: AuditCheck["evidence"];
   fix?: AuditCheck["fix"];
+  /** Whether the check describes the origin or sampled pages. */
+  scope?: AuditCheck["scope"];
+  /** Coverage across sampled pages, for aggregated page checks. */
+  sample?: AuditCheck["sample"];
 }
 
 export interface AuditReportPillar {
@@ -158,6 +162,8 @@ function reportCheck(pillar: AuditPillar, check: AuditCheck): AuditReportCheck {
     protocol: check.protocol,
     evidence: check.evidence,
     fix: check.fix,
+    scope: check.scope,
+    ...(check.sample ? { sample: check.sample } : {}),
   };
 }
 

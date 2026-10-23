@@ -13,6 +13,7 @@ describe("readInputs", () => {
       commentOnPr: true,
       githubToken: null,
       timeoutMs: 10_000,
+      reportStyle: "technical",
     });
   });
 
@@ -42,6 +43,14 @@ describe("readInputs", () => {
       INPUT_SITE_TYPE: "ecommerce",
     });
     expect(underscored).toMatchObject({ minScore: 50, minGrade: "C", siteType: "ecommerce" });
+  });
+
+  it("reads the report style", () => {
+    expect(readInputs({ INPUT_URL: "x", "INPUT_REPORT-STYLE": "Plain" }).reportStyle).toBe("plain");
+    expect(readInputs({ INPUT_URL: "x", INPUT_REPORT_STYLE: "" }).reportStyle).toBe("technical");
+    expect(() => readInputs({ INPUT_URL: "x", "INPUT_REPORT-STYLE": "fancy" })).toThrow(
+      /report-style/,
+    );
   });
 
   it("rejects missing and malformed inputs", () => {

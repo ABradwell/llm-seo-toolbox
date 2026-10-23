@@ -69,6 +69,7 @@ describe("parseArgs", () => {
 describe("value parsers", () => {
   it("validates formats", () => {
     expect(parseFormat("SUMMARY")).toBe("summary");
+    expect(parseFormat("brief")).toBe("brief");
     expect(() => parseFormat("xml")).toThrow(/Unknown format/);
   });
 

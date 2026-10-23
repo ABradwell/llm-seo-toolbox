@@ -86,6 +86,8 @@ function aggregateCheck(id: string, pages: PageAuditResult[]): AuditCheck {
 
   const status = score >= 90 ? "pass" : score >= 50 ? "warn" : "fail";
   const failing = observations.find((entry) => entry.check.status !== "pass");
+  // A passing page carries no recommendation or fix, so prefer a failing page as the template.
+  const base = failing?.check ?? template;
   const detailParts = [
     `${passed} of ${observations.length} sampled pages pass`,
     warned > 0 ? `${warned} warn` : null,
@@ -93,13 +95,13 @@ function aggregateCheck(id: string, pages: PageAuditResult[]): AuditCheck {
   ].filter(Boolean);
 
   return {
-    ...template,
+    ...base,
     status,
     score,
     scope: "page",
     summary: `${passed} / ${observations.length} pages pass`,
     detail: `${detailParts.join(" · ")}.${affected.length > 0 ? ` Failing pages: ${affected.join(", ")}.` : ""}`,
-    evidence: failing?.check.evidence ?? template.evidence,
+    evidence: base.evidence,
     sample,
   };
 }

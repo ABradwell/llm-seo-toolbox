@@ -33,6 +33,10 @@ inputs:
     description: "Per-request timeout in milliseconds"
     required: false
     default: "10000"
+  report-style:
+    description: "Pull request report style: technical (full check matrix) or plain (plain-language change requests for non-technical readers)"
+    required: false
+    default: "technical"
 
 outputs:
   score:

@@ -48,12 +48,15 @@ A terminal hero with a quick audit bar. Below it, a **three-step pipeline** show
 
 Above the tabs, the **site classification panel** shows the detected profile, confidence, the signals behind it and the compatibility rules it applies. When automatic confidence falls below 30%, the profile title is flagged and every option is shown with its own compact confidence bar. The profile select re-runs the audit with a `type` parameter, so an override is shareable and cached separately from the automatic result. A **scope** switch controls whether the score is origin-scoped (the default) or the single-page V2 audit (`scope=page`). Entering a deep link such as `/app/docs/start` sets the focus page for the drill-down; it does not move the site score.
 
-| Tab                   | What it does                                                                                                                                                                                                                                                                      |
-| :-------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Audit matrix**      | Site or page score and grade, per-pillar breakdown, every check with pass/warn/fail, the protocol it enforces, the source file and exact line number, sample coverage for aggregated page checks, a prioritized fix queue, discovery file table, and expandable code-level fixes. |
-| **Sampled pages**     | The pages that feed the site score, with per-page status, score, outline, static-text and robots signals. Expand a row for its eight page-level checks. The focus page is shown separately when it was not in the sample.                                                         |
-| **`llms.txt` editor** | Edit the site name, summary and notes, choose discovered sections, then preview `llms.txt` or `llms-full.txt` with line numbers, live validation and copy/download actions.                                                                                                       |
-| **Scraper simulator** | The focus page's raw HTML beside the cleaned markdown a non-JS crawler would ingest, with payload reduction, token estimates, stripped-element counts and line numbers on both panes.                                                                                             |
+A **view** switch sets how much detail the first tab shows. The default is **plain language**, written for marketers and site owners. Each failing or warning check gets a jargon-free reason, a "tell me more" explainer, who usually does the work, and bullet-point change requests. The **change requests** panel turns the selected items into one copy-paste brief, as markdown that also reads as plain text, for an email, ticket or chat. An optional checkbox adds file locations, findings and fix snippets for the developer. Choosing **technical** (`view=technical`) shows the full audit matrix. Each plain card links to its row in the matrix. The plain copy lives in [`packages/core/src/plain-language.ts`](packages/core/src/plain-language.ts), separate from the check logic.
+
+| Tab                   | What it does                                                                                                                                                                                                                                                                                                          |
+| :-------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **What to fix**       | The plain-language view: a grade in plain words, must-fix and worth-improving cards with change requests, a copyable brief for developers, and a list of what already works. Shown when the view is `plain`.                                                                                                          |
+| **Audit matrix**      | Shown when the view is `technical`. Site or page score and grade, per-pillar breakdown, every check with pass/warn/fail, the protocol it enforces, the source file and exact line number, sample coverage for aggregated page checks, a prioritized fix queue, discovery file table, and expandable code-level fixes. |
+| **Sampled pages**     | The pages that feed the site score, with per-page status, score, outline, static-text and robots signals. Expand a row for its eight page-level checks. The focus page is shown separately when it was not in the sample.                                                                                             |
+| **`llms.txt` editor** | Edit the site name, summary and notes, choose discovered sections, then preview `llms.txt` or `llms-full.txt` with line numbers, live validation and copy/download actions.                                                                                                                                           |
+| **Scraper simulator** | The focus page's raw HTML beside the cleaned markdown a non-JS crawler would ingest, with payload reduction, token estimates, stripped-element counts and line numbers on both panes.                                                                                                                                 |
 
 ## Screenshots
 
@@ -145,7 +148,7 @@ node packages/cli/dist/index.js example.com --format json
 
 | Flag                   | Short | Default         | Description                                                                                       |
 | :--------------------- | :---- | :-------------- | :------------------------------------------------------------------------------------------------ |
-| `--format <type>`      | `-f`  | `table`         | `table`, `json`, `markdown` or `summary`                                                          |
+| `--format <type>`      | `-f`  | `table`         | `table`, `json`, `markdown`, `summary` or `brief` (plain-language change requests)                |
 | `--min-score <number>` | `-s`  | `0`             | Composite score required to pass (0–100)                                                          |
 | `--min-grade <grade>`  | `-g`  | `F`             | Letter grade required to pass (`A`, `B`, `C`, `D`, `F`)                                           |
 | `--site-type <type>`   | `-t`  | `auto`          | Force a profile: `auto`, `saas`, `portfolio`, `docs`, `ecommerce`, `local-business`, `blog-media` |
@@ -206,8 +209,11 @@ threshold.
 | `comment-on-pr` | `true`                | Create or update the sticky pull request comment |
 | `github-token`  | `${{ github.token }}` | Token used to write the comment                  |
 | `timeout`       | `10000`               | Per-request timeout in milliseconds              |
+| `report-style`  | `technical`           | `technical` matrix, or `plain` change requests   |
 
 Outputs: `score`, `grade`, `passed` and `report-json`.
+
+Set `report-style: plain` when the comment is read by people outside engineering. The comment then leads with the pass or fail verdict, followed by the same plain-language change requests as the web app, with technical references for the developer.
 
 The repository dogfoods the action in
 [`.github/workflows/llm-seo-toolbox-audit.yml`](.github/workflows/llm-seo-toolbox-audit.yml).

@@ -2,6 +2,8 @@ export { analyzeSite, AuditError, clearAuditCache } from "./analyzer";
 export type { AnalyzeOptions } from "./analyzer";
 export { aggregatePageChecks, directPageChecks } from "./aggregate";
 export type { PageCheckGroups } from "./aggregate";
+export { buildPlainBrief, renderChangeRequests } from "./brief";
+export type { ChangeRequestOptions, PlainBrief, PlainIssue } from "./brief";
 export { classifySite } from "./classifier";
 export type { ClassificationInput, ClassificationOptions } from "./classifier";
 export { buildContentModel, SNR_PASS, SNR_WARN } from "./content";
@@ -13,6 +15,24 @@ export { buildLlmsFullTxt, buildLlmsTxt, groupPages, sectionForPath } from "./ll
 export type { LlmsBuildInput, LlmsSection } from "./llms";
 export { validateLlmsTxt } from "./llms-txt";
 export type { LlmsTxtIssue, LlmsTxtSection, LlmsTxtValidation } from "./llms-txt";
+export {
+  PAGE_CHECK_IDS,
+  PLAIN_CHECK_COPY,
+  PLAIN_GRADE_LABELS,
+  PLAIN_OWNER_LABELS,
+  PLAIN_PILLAR_NAMES,
+  plainCatalogEntry,
+  plainCopyFor,
+  plainGradeSummary,
+  SITE_CHECK_IDS,
+} from "./plain-language";
+export type {
+  ActionableStatus,
+  PlainCheckCopy,
+  PlainCopyContext,
+  PlainOwner,
+  ResolvedPlainCopy,
+} from "./plain-language";
 export {
   buildReport,
   evaluateThresholds,
@@ -49,6 +69,7 @@ export type {
   RobotsVerdict,
 } from "./robots";
 export {
+  compareFixPriority,
   gradeFor,
   isAuditGrade,
   scoreAudit,

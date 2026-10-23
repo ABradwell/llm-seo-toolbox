@@ -1,4 +1,4 @@
-import type { AuditGrade, AuditPillar } from "./types";
+import type { AuditGrade, AuditPillar, CheckStatus } from "./types";
 
 export const AUDIT_GRADES: readonly AuditGrade[] = ["A", "B", "C", "D", "F"];
 
@@ -24,6 +24,16 @@ export function statusScore(status: "pass" | "warn" | "fail" | "info"): number |
     default:
       return null;
   }
+}
+
+/** Fix-queue order: failures before warnings, then heavier checks first. */
+export function compareFixPriority(
+  a: { status: CheckStatus; weight: number },
+  b: { status: CheckStatus; weight: number },
+): number {
+  const rank = (status: CheckStatus) => (status === "fail" ? 0 : status === "warn" ? 1 : 2);
+  if (rank(a.status) !== rank(b.status)) return rank(a.status) - rank(b.status);
+  return b.weight - a.weight;
 }
 
 export function scorePillar(pillar: Pick<AuditPillar, "checks">): number {
