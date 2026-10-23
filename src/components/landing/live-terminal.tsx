@@ -29,7 +29,7 @@ export function LiveTerminal() {
           <span className="size-1.5 rounded-full bg-accent-light" aria-hidden="true" />
           reference run
         </div>
-        <span className="truncate font-mono text-[10px] text-code-muted/70">v3 · site + focus</span>
+        <span className="truncate font-mono text-[10px] text-code-muted/70">v5 · site + focus</span>
       </div>
 
       <div className="relative min-h-[268px] scanlines p-4 font-mono text-[11.5px] leading-6 sm:text-[12px]">

@@ -24,7 +24,7 @@ export function TerminalHero() {
               className="border-accent-light/40 bg-accent-light/10 text-accent-light"
             >
               <Radio className="size-3" aria-hidden="true" />
-              V3 · classify + audit
+              V5 · classify + audit
             </Badge>
             <span className="font-mono text-[10px] tracking-[0.12em] text-parchment/65 uppercase">
               open source · no signup
